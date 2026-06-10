@@ -507,3 +507,102 @@ td.cell-payout.paid { color: var(--c-fv); }
   padding: 5px 12px;
 }
 .bonus-rate strong { color: var(--c-fv); margin-left: 4px; }
+
+/* ════════════ UPDATE 5: team sales ════════════ */
+.team-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.team-name-input {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 16px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: var(--text);
+  min-width: 200px;
+}
+.team-name-input:hover { border-color: var(--border); }
+.team-name-input:focus { border-color: var(--accent); }
+.team-target-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.team-head .spacer { flex: 1; }
+
+.member-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.member-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.member-chip:hover { border-color: var(--text-dim); }
+.member-chip.in-team {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.chip-check {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+.member-chip.in-team .chip-check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.member-chip.in-team .chip-check::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 800;
+  color: #14110A;
+}
+
+.team-summary { font-size: 13px; color: var(--text-dim); margin-bottom: 12px; }
+.ts-hit-count { color: var(--c-fv); }
+.ts-miss-count { color: var(--c-total); }
+
+.ts-status {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 10px;
+  border-radius: 99px;
+}
+.ts-status.hit { background: rgba(88,201,136,0.14); color: var(--c-fv); }
+.ts-status.miss { background: rgba(240,122,122,0.14); color: var(--c-total); }
+.ts-status.future { color: var(--text-dim); }

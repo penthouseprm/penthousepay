@@ -12,6 +12,7 @@ let currentProfile = null;
 let sheetMonth = startOfMonth(new Date());
 let payMonth = startOfMonth(new Date());
 let bonusMonth = startOfMonth(new Date());
+let teamMonth = startOfMonth(new Date());
 let saveTimers = {};
 let membersCache = [];
 let memberSheetTarget = null; // profile being edited by admin in payroll
@@ -216,11 +217,12 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
     document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     const view = btn.dataset.view;
-    ["my-timesheet", "team", "bonuses", "payroll"].forEach((v) => {
+    ["my-timesheet", "team", "team-sales", "bonuses", "payroll"].forEach((v) => {
       $("view-" + v).classList.toggle("hidden", v !== view);
     });
     if (view === "my-timesheet") renderMySheet();
     if (view === "team") renderTeam();
+    if (view === "team-sales") renderTeamSales();
     if (view === "bonuses") renderBonuses();
     if (view === "payroll") renderPayroll();
   });
@@ -593,15 +595,41 @@ $("month-prev").addEventListener("click", () => {
   renderMySheet();
 });
 $("month-next").addEventListener("click", () => {
-  sheetMonth = new Date(sheetMonth.getFullYear(), sheetMonth.getMonth() + 1, 1);
+  const next = new Date(sheetMonth.getFullYear(), sheetMonth.getMonth() + 1, 1);
+  if (next.getTime() > startOfMonth(new Date()).getTime()) {
+    toast("That timesheet isn't available yet — it opens on the 1st.");
+    return;
+  }
+  sheetMonth = next;
   renderMySheet();
 });
 
 async function renderMySheet() {
   $("month-label").textContent = monthLabel(sheetMonth);
   setSaveStatus("", "");
+
+  // future months are unavailable until they start
+  const atCurrentMonth = sheetMonth.getTime() >= startOfMonth(new Date()).getTime();
+  $("month-next").disabled = atCurrentMonth;
+  $("month-next").style.opacity = atCurrentMonth ? "0.35" : "1";
+
   await renderUserSheet($("my-sheet-sections"), currentProfile, sheetMonth, "self");
 }
+
+// auto-rollover: when a new month starts, move anyone viewing the
+// (old) current month onto the new one automatically
+let realMonth = startOfMonth(new Date());
+setInterval(() => {
+  const nowMonth = startOfMonth(new Date());
+  if (nowMonth.getTime() !== realMonth.getTime()) {
+    const prevMonth = realMonth;
+    realMonth = nowMonth;
+    if (currentUser && sheetMonth.getTime() === prevMonth.getTime()) {
+      sheetMonth = nowMonth;
+      if (!$("view-my-timesheet").classList.contains("hidden")) renderMySheet();
+    }
+  }
+}, 60000);
 
 $("my-sheet-sections").addEventListener("input", handleSheetInput);
 $("member-sheet-sections").addEventListener("input", handleSheetInput);
@@ -703,6 +731,234 @@ $("members-body").addEventListener("input", (e) => {
       currentProfile[input.dataset.rateField] = num(input.value);
     }
   }, 700);
+});
+
+// ════════════════════════════════════════════════════════════
+// TEAM SALES (admin)
+// ════════════════════════════════════════════════════════════
+$("ts-month-prev").addEventListener("click", () => {
+  teamMonth = new Date(teamMonth.getFullYear(), teamMonth.getMonth() - 1, 1);
+  renderTeamSales();
+});
+$("ts-month-next").addEventListener("click", () => {
+  teamMonth = new Date(teamMonth.getFullYear(), teamMonth.getMonth() + 1, 1);
+  renderTeamSales();
+});
+
+$("btn-create-team").addEventListener("click", async () => {
+  const name = $("new-team-name").value.trim();
+  const target = num($("new-team-target").value);
+  if (!name) { toast("Enter a team name.", true); return; }
+
+  const { error } = await db.from("teams").insert({ name, daily_target: target });
+  if (error) { toast("Could not create team: " + error.message, true); return; }
+
+  $("new-team-name").value = "";
+  $("new-team-target").value = "";
+  toast("Team created ✓");
+  renderTeamSales();
+});
+
+async function renderTeamSales() {
+  $("ts-month-label").textContent = monthLabel(teamMonth);
+
+  const { first, last } = monthRange(teamMonth);
+
+  const [
+    { data: teams, error: tErr },
+    { data: teamMembers, error: tmErr },
+    { data: members, error: mErr },
+    { data: sheets, error: sErr },
+  ] = await Promise.all([
+    db.from("teams").select("*").order("created_at", { ascending: true }),
+    db.from("team_members").select("*"),
+    db.from("profiles").select("*").order("name", { ascending: true }),
+    db.from("timesheets").select("*").gte("entry_date", first).lte("entry_date", last),
+  ]);
+
+  const container = $("teams-container");
+  container.innerHTML = "";
+
+  if (tErr || tmErr || mErr || sErr) {
+    container.innerHTML = `<p class="hint">Failed to load team sales data.</p>`;
+    return;
+  }
+  membersCache = members || [];
+
+  if (!teams || !teams.length) {
+    container.innerHTML = `<p class="hint">No teams yet — create your first one above.</p>`;
+    return;
+  }
+
+  const todayIso = isoDate(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+
+  teams.forEach((team) => {
+    const memberIds = (teamMembers || [])
+      .filter((tm) => tm.team_id === team.id)
+      .map((tm) => tm.user_id);
+
+    const section = document.createElement("section");
+    section.className = "panel";
+    section.dataset.teamId = team.id;
+
+    // header: name + target editors + delete
+    const head = document.createElement("div");
+    head.className = "team-head";
+    head.innerHTML = `
+      <input class="team-name-input" data-tfield="name" value="${team.name}" title="Team name">
+      <label class="team-target-label">Daily target $
+        <input class="cell rate" data-tfield="daily_target" type="number" min="0" step="0.01" value="${team.daily_target}">
+      </label>
+      <span class="spacer"></span>
+      <button class="btn btn-danger btn-small" data-del-team type="button">Delete team</button>
+    `;
+    section.appendChild(head);
+
+    // member chips
+    const chips = document.createElement("div");
+    chips.className = "member-chips";
+    membersCache.forEach((m) => {
+      const inTeam = memberIds.includes(m.id);
+      const chip = document.createElement("label");
+      chip.className = "member-chip" + (inTeam ? " in-team" : "");
+      chip.innerHTML = `
+        <input type="checkbox" class="chip-check" data-chip-user="${m.id}" ${inTeam ? "checked" : ""}>
+        ${m.name || m.email}
+      `;
+      chips.appendChild(chip);
+    });
+    section.appendChild(chips);
+
+    // daily tally table
+    const year = teamMonth.getFullYear();
+    const monthIdx = teamMonth.getMonth();
+    const lastDay = daysInMonth(teamMonth);
+    let hits = 0, misses = 0;
+
+    const scroll = document.createElement("div");
+    scroll.className = "table-scroll";
+    const rowsHtml = [];
+
+    for (let day = 1; day <= lastDay; day++) {
+      const date = isoDate(year, monthIdx, day);
+      const isFuture = date > todayIso;
+      const dateObj = new Date(year, monthIdx, day);
+      const label = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
+
+      let dayNet = 0;
+      (sheets || []).forEach((r) => {
+        if (r.entry_date !== date || !memberIds.includes(r.user_id)) return;
+        const m = membersCache.find((x) => x.id === r.user_id);
+        if (!m) return;
+        dayNet += calcRow(r, m).total;
+      });
+
+      let statusHtml = `<span class="ts-status future">—</span>`;
+      if (!isFuture) {
+        const hit = dayNet >= num(team.daily_target) && num(team.daily_target) > 0;
+        if (num(team.daily_target) === 0) {
+          statusHtml = `<span class="ts-status future">No target</span>`;
+        } else if (hit) {
+          statusHtml = `<span class="ts-status hit">HIT ✓</span>`;
+          hits++;
+        } else {
+          statusHtml = `<span class="ts-status miss">MISS</span>`;
+          misses++;
+        }
+      }
+
+      rowsHtml.push(`
+        <tr${(dateObj.getDay() === 0 || dateObj.getDay() === 6) ? ' class="weekend"' : ""}>
+          <td class="col-date">${label}</td>
+          <td class="col-num cell-total">${fmt(dayNet)}</td>
+          <td class="col-num">${fmt(team.daily_target)}</td>
+          <td>${statusHtml}</td>
+        </tr>
+      `);
+    }
+
+    const summary = document.createElement("p");
+    summary.className = "team-summary";
+    summary.innerHTML = `This month: <strong class="ts-hit-count">${hits} hit${hits === 1 ? "" : "s"}</strong> · <strong class="ts-miss-count">${misses} miss${misses === 1 ? "" : "es"}</strong>`;
+    section.appendChild(summary);
+
+    scroll.innerHTML = `
+      <table class="sheet plain" style="min-width: 560px;">
+        <thead>
+          <tr>
+            <th class="col-date">Date</th>
+            <th class="col-num th-total">Team Net Sales $</th>
+            <th class="col-num th-grey">Target $</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml.join("")}</tbody>
+      </table>
+    `;
+    section.appendChild(scroll);
+
+    container.appendChild(section);
+  });
+}
+
+// delegated handlers: team edits, member toggles, delete
+let teamFieldTimers = {};
+$("teams-container").addEventListener("input", (e) => {
+  const input = e.target;
+  if (!input.dataset.tfield) return;
+
+  const section = input.closest("[data-team-id]");
+  const teamId = section.dataset.teamId;
+  const field = input.dataset.tfield;
+  const timerKey = teamId + ":" + field;
+
+  clearTimeout(teamFieldTimers[timerKey]);
+  teamFieldTimers[timerKey] = setTimeout(async () => {
+    const value = field === "daily_target" ? num(input.value) : input.value.trim();
+    const { error } = await db.from("teams").update({ [field]: value }).eq("id", teamId);
+    if (error) { toast("Team update failed: " + error.message, true); return; }
+    toast("Team updated");
+    if (field === "daily_target") renderTeamSales();
+  }, 700);
+});
+
+$("teams-container").addEventListener("change", async (e) => {
+  const check = e.target;
+  if (!check.classList.contains("chip-check")) return;
+
+  const section = check.closest("[data-team-id]");
+  const teamId = section.dataset.teamId;
+  const chipUserId = check.dataset.chipUser;
+
+  if (check.checked) {
+    const { error } = await db.from("team_members").insert({ team_id: teamId, user_id: chipUserId });
+    if (error && error.code !== "23505") {
+      check.checked = false;
+      toast("Could not add member: " + error.message, true);
+      return;
+    }
+  } else {
+    const { error } = await db.from("team_members").delete().eq("team_id", teamId).eq("user_id", chipUserId);
+    if (error) {
+      check.checked = true;
+      toast("Could not remove member: " + error.message, true);
+      return;
+    }
+  }
+  renderTeamSales();
+});
+
+$("teams-container").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-del-team]");
+  if (!btn) return;
+
+  const section = btn.closest("[data-team-id]");
+  if (!confirm("Delete this team? (Doesn't affect any timesheet data.)")) return;
+
+  const { error } = await db.from("teams").delete().eq("id", section.dataset.teamId);
+  if (error) { toast("Could not delete team: " + error.message, true); return; }
+  toast("Team deleted");
+  renderTeamSales();
 });
 
 // ════════════════════════════════════════════════════════════
@@ -878,23 +1134,25 @@ async function renderPayroll() {
     { data: sheets, error: shErr },
     { data: subs, error: subErr },
     { data: pays, error: payErr },
+    { data: monthBonuses, error: bonusErr },
   ] = await Promise.all([
     db.from("profiles").select("*").order("name", { ascending: true }),
     db.from("timesheets").select("*").gte("entry_date", first).lte("entry_date", last),
     db.from("submissions").select("*").in("period", pKeys),
     db.from("payments").select("*").in("period", [pay15Key, pay1Key]),
+    db.from("bonuses").select("*").eq("month", bonusMonthKey(payMonth)),
   ]);
 
   const body = $("payroll-body");
   body.innerHTML = "";
 
-  if (memErr || shErr || subErr || payErr) {
-    body.innerHTML = `<tr><td colspan="8">Failed to load payroll data.</td></tr>`;
+  if (memErr || shErr || subErr || payErr || bonusErr) {
+    body.innerHTML = `<tr><td colspan="10">Failed to load payroll data.</td></tr>`;
     return;
   }
   membersCache = members || [];
 
-  const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, on15: 0, on1: 0, total: 0 };
+  const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, bonus: 0, on15: 0, on1: 0, total: 0 };
 
   membersCache.forEach((m) => {
     const rows = (sheets || []).filter((s) => s.user_id === m.id);
@@ -909,16 +1167,20 @@ async function renderPayroll() {
       else { h2Hours += num(r.hours); }
     });
 
+    const bonusRow = (monthBonuses || []).find((b) => b.user_id === m.id);
+    const bonusTotal = bonusRow ? calcBonusTotal(bonusRow) : 0;
+
     const h1Pay = h1Hours * num(m.hourly_rate);
     const h2Pay = h2Hours * num(m.hourly_rate);
-    const payOn15 = h1Pay;                 // 15th: hours 1–14 only
-    const payOn1 = h2Pay + commMonth;      // 1st: hours 15–end + ALL commission
+    const payOn15 = h1Pay;                              // 15th: hours 1–14 only
+    const payOn1 = h2Pay + commMonth + bonusTotal;      // 1st: hours 15–end + ALL commission + bonuses
     const monthTotal = payOn15 + payOn1;
 
     grand.h1Hours += h1Hours;
     grand.h2Hours += h2Hours;
     grand.comm += commMonth;
     grand.net += netMonth;
+    grand.bonus += bonusTotal;
     grand.on15 += payOn15;
     grand.on1 += payOn1;
     grand.total += monthTotal;
@@ -939,6 +1201,7 @@ async function renderPayroll() {
       <td class="col-num">${h2Hours}</td>
       <td class="col-num cell-total">${fmt(netMonth)}</td>
       <td class="col-num cell-grey">${fmt(commMonth)}</td>
+      <td class="col-num cell-grey">${fmt(bonusTotal)}</td>
       <td class="col-num cell-payout${paid15 ? " paid" : ""}">
         <label class="paid-wrap" title="Mark paid">
           <strong>${fmt(payOn15)}</strong>
@@ -964,6 +1227,7 @@ async function renderPayroll() {
       <td class="col-num">${grand.h2Hours}</td>
       <td class="col-num cell-total">${fmt(grand.net)}</td>
       <td class="col-num cell-grey">${fmt(grand.comm)}</td>
+      <td class="col-num cell-grey">${fmt(grand.bonus)}</td>
       <td class="col-num cell-payout"><strong>${fmt(grand.on15)}</strong></td>
       <td class="col-num cell-payout"><strong>${fmt(grand.on1)}</strong></td>
       <td class="col-num"><strong>${fmt(grand.total)}</strong></td>
