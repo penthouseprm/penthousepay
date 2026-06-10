@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Timesheets — Penthouse Promotions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ═══════════ AUTH VIEW ═══════════ -->
+<div id="auth-view" class="auth-wrap hidden">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <span class="brand-mark">PP</span>
+      <h1>Timesheets</h1>
+      <p class="auth-sub">Penthouse Promotions — payroll &amp; sales tracking</p>
+    </div>
+
+    <div class="auth-tabs">
+      <button id="tab-login" class="auth-tab active" type="button">Log in</button>
+      <button id="tab-signup" class="auth-tab" type="button">Sign up</button>
+    </div>
+
+    <div id="login-form" class="auth-form">
+      <label>Email
+        <input type="email" id="login-email" autocomplete="email" placeholder="you@example.com">
+      </label>
+      <label>Password
+        <input type="password" id="login-password" autocomplete="current-password" placeholder="••••••••">
+      </label>
+      <button id="btn-login" class="btn btn-primary btn-block" type="button">Log in</button>
+    </div>
+
+    <div id="signup-form" class="auth-form hidden">
+      <label>Name
+        <input type="text" id="signup-name" autocomplete="name" placeholder="Your name">
+      </label>
+      <label>Email
+        <input type="email" id="signup-email" autocomplete="email" placeholder="you@example.com">
+      </label>
+      <label>Password
+        <input type="password" id="signup-password" autocomplete="new-password" placeholder="Min. 6 characters">
+      </label>
+      <button id="btn-signup" class="btn btn-primary btn-block" type="button">Create account</button>
+      <p class="auth-note">You need an invite from an admin to sign up.</p>
+    </div>
+
+    <p id="auth-error" class="auth-error hidden"></p>
+  </div>
+</div>
+
+<!-- ═══════════ APP VIEW ═══════════ -->
+<div id="app-view" class="hidden">
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="brand-mark sm">PP</span>
+      <nav class="nav">
+        <button class="nav-btn active" data-view="my-timesheet" type="button">My Timesheet</button>
+        <button class="nav-btn admin-only hidden" data-view="team" type="button">Team</button>
+        <button class="nav-btn admin-only hidden" data-view="payroll" type="button">Payroll</button>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <span id="user-name" class="user-name"></span>
+      <button id="btn-logout" class="btn btn-ghost" type="button">Log out</button>
+    </div>
+  </header>
+
+  <!-- ── MY TIMESHEET ── -->
+  <main id="view-my-timesheet" class="view">
+    <div class="view-head">
+      <h2 id="sheet-title">My Timesheet</h2>
+      <div class="month-nav">
+        <button id="month-prev" class="btn btn-ghost" type="button">‹</button>
+        <span id="month-label" class="month-label"></span>
+        <button id="month-next" class="btn btn-ghost" type="button">›</button>
+      </div>
+      <span id="save-status" class="save-status"></span>
+    </div>
+
+    <div class="table-scroll">
+      <table class="sheet" id="sheet-table">
+        <thead>
+          <tr>
+            <th class="col-date">Date</th>
+            <th class="col-num th-hours">Hours</th>
+            <th class="col-num th-of">OF Gross $</th>
+            <th class="col-num th-of net">OF Net $</th>
+            <th class="col-num th-fv">FV Gross $</th>
+            <th class="col-num th-fv net">FV Net $</th>
+            <th class="col-num th-slushy">Slushy Gross $</th>
+            <th class="col-num th-slushy net">Slushy Net $</th>
+            <th class="col-num th-fansly">Fansly Gross $</th>
+            <th class="col-num th-fansly net">Fansly Net $</th>
+            <th class="col-num th-total">Total Sales</th>
+            <th class="col-num th-comm">Commission $</th>
+            <th class="col-num th-pay">Hours $</th>
+          </tr>
+        </thead>
+        <tbody id="sheet-body"></tbody>
+        <tfoot id="sheet-foot"></tfoot>
+      </table>
+    </div>
+  </main>
+
+  <!-- ── TEAM (admin) ── -->
+  <main id="view-team" class="view hidden">
+    <div class="view-head">
+      <h2>Team</h2>
+    </div>
+
+    <section class="panel">
+      <h3>Invite a member</h3>
+      <div class="invite-row">
+        <input type="email" id="invite-email" placeholder="member@email.com">
+        <select id="invite-role">
+          <option value="member">Member</option>
+          <option value="admin">Admin</option>
+        </select>
+        <button id="btn-invite" class="btn btn-primary" type="button">Send invite</button>
+      </div>
+      <p class="hint">The person then signs up with this exact email on the login page.</p>
+      <div id="invites-list" class="invites-list"></div>
+    </section>
+
+    <section class="panel">
+      <h3>Members</h3>
+      <div class="table-scroll">
+        <table class="sheet plain">
+          <thead>
+            <tr>
+              <th>Name</th><th>Email</th><th>Role</th>
+              <th class="col-num">Hourly rate $</th>
+              <th class="col-num">Commission %</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="members-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- ── PAYROLL (admin) ── -->
+  <main id="view-payroll" class="view hidden">
+    <div class="view-head">
+      <h2>Payroll</h2>
+      <div class="month-nav">
+        <button id="pay-month-prev" class="btn btn-ghost" type="button">‹</button>
+        <span id="pay-month-label" class="month-label"></span>
+        <button id="pay-month-next" class="btn btn-ghost" type="button">›</button>
+      </div>
+    </div>
+
+    <section class="panel">
+      <h3>Monthly summary — all members</h3>
+      <div class="table-scroll">
+        <table class="sheet plain">
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th class="col-num">Hours</th>
+              <th class="col-num th-total">Total Sales</th>
+              <th class="col-num th-comm">Commission $</th>
+              <th class="col-num th-pay">Hours $</th>
+              <th class="col-num">Total Payout $</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="payroll-body"></tbody>
+          <tfoot id="payroll-foot"></tfoot>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel hidden" id="member-sheet-panel">
+      <h3 id="member-sheet-title"></h3>
+      <div class="table-scroll">
+        <table class="sheet">
+          <thead>
+            <tr>
+              <th class="col-date">Date</th>
+              <th class="col-num th-hours">Hours</th>
+              <th class="col-num th-of">OF Gross $</th>
+              <th class="col-num th-of net">OF Net $</th>
+              <th class="col-num th-fv">FV Gross $</th>
+              <th class="col-num th-fv net">FV Net $</th>
+              <th class="col-num th-slushy">Slushy Gross $</th>
+              <th class="col-num th-slushy net">Slushy Net $</th>
+              <th class="col-num th-fansly">Fansly Gross $</th>
+              <th class="col-num th-fansly net">Fansly Net $</th>
+              <th class="col-num th-total">Total Sales</th>
+              <th class="col-num th-comm">Commission $</th>
+              <th class="col-num th-pay">Hours $</th>
+            </tr>
+          </thead>
+          <tbody id="member-sheet-body"></tbody>
+          <tfoot id="member-sheet-foot"></tfoot>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
