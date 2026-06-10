@@ -490,3 +490,20 @@ td.cell-grey { color: var(--text-dim); }
 .th-payout { color: var(--accent) !important; }
 td.cell-payout { color: var(--accent); }
 td.cell-payout.paid { color: var(--c-fv); }
+
+/* ════════════ UPDATE 4: bonuses ════════════ */
+.bonus-rates {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.bonus-rate {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  padding: 5px 12px;
+}
+.bonus-rate strong { color: var(--c-fv); margin-left: 4px; }

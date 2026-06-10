@@ -11,6 +11,7 @@ let currentUser = null;
 let currentProfile = null;
 let sheetMonth = startOfMonth(new Date());
 let payMonth = startOfMonth(new Date());
+let bonusMonth = startOfMonth(new Date());
 let saveTimers = {};
 let membersCache = [];
 let memberSheetTarget = null; // profile being edited by admin in payroll
@@ -215,11 +216,12 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
     document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     const view = btn.dataset.view;
-    ["my-timesheet", "team", "payroll"].forEach((v) => {
+    ["my-timesheet", "team", "bonuses", "payroll"].forEach((v) => {
       $("view-" + v).classList.toggle("hidden", v !== view);
     });
     if (view === "my-timesheet") renderMySheet();
     if (view === "team") renderTeam();
+    if (view === "bonuses") renderBonuses();
     if (view === "payroll") renderPayroll();
   });
 });
@@ -700,6 +702,151 @@ $("members-body").addEventListener("input", (e) => {
     if (input.dataset.member === currentUser.id) {
       currentProfile[input.dataset.rateField] = num(input.value);
     }
+  }, 700);
+});
+
+// ════════════════════════════════════════════════════════════
+// BONUSES (admin)
+// ════════════════════════════════════════════════════════════
+function bonusMonthKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function calcBonusTotal(b) {
+  return num(b.full_script) * BONUS_RATES.full_script
+    + num(b.rebuttal) * BONUS_RATES.rebuttal
+    + num(b.team) * BONUS_RATES.team
+    + num(b.individual) * BONUS_RATES.individual
+    + num(b.extras);
+}
+
+$("bonus-month-prev").addEventListener("click", () => {
+  bonusMonth = new Date(bonusMonth.getFullYear(), bonusMonth.getMonth() - 1, 1);
+  renderBonuses();
+});
+$("bonus-month-next").addEventListener("click", () => {
+  bonusMonth = new Date(bonusMonth.getFullYear(), bonusMonth.getMonth() + 1, 1);
+  renderBonuses();
+});
+
+function setBonusSaveStatus(state, text) {
+  const el = $("bonus-save-status");
+  el.className = "save-status " + (state || "");
+  el.textContent = text || "";
+}
+
+async function renderBonuses() {
+  $("bonus-month-label").textContent = monthLabel(bonusMonth);
+  setBonusSaveStatus("", "");
+  const mKey = bonusMonthKey(bonusMonth);
+
+  const [
+    { data: members, error: memErr },
+    { data: bonuses, error: bonErr },
+  ] = await Promise.all([
+    db.from("profiles").select("*").order("name", { ascending: true }),
+    db.from("bonuses").select("*").eq("month", mKey),
+  ]);
+
+  const body = $("bonuses-body");
+  body.innerHTML = "";
+
+  if (memErr || bonErr) {
+    body.innerHTML = `<tr><td colspan="7">Failed to load bonuses: ${(memErr || bonErr).message}</td></tr>`;
+    return;
+  }
+  membersCache = members || [];
+
+  membersCache.forEach((m) => {
+    const b = (bonuses || []).find((x) => x.user_id === m.id) ||
+      { full_script: "", rebuttal: "", team: "", individual: "", extras: "" };
+
+    const tr = document.createElement("tr");
+    tr.dataset.bonusUser = m.id;
+    tr.innerHTML = `
+      <td>${m.name || m.email}</td>
+      <td class="col-num"><input class="cell bonus-cell" data-bfield="full_script" type="number" min="0" step="1" value="${b.full_script || ""}" placeholder="–"></td>
+      <td class="col-num"><input class="cell bonus-cell" data-bfield="rebuttal" type="number" min="0" step="1" value="${b.rebuttal || ""}" placeholder="–"></td>
+      <td class="col-num"><input class="cell bonus-cell" data-bfield="team" type="number" min="0" step="1" value="${b.team || ""}" placeholder="–"></td>
+      <td class="col-num"><input class="cell bonus-cell" data-bfield="individual" type="number" min="0" step="1" value="${b.individual || ""}" placeholder="–"></td>
+      <td class="col-num"><input class="cell bonus-cell" data-bfield="extras" type="number" min="0" step="0.01" value="${b.extras || ""}" placeholder="–"></td>
+      <td class="col-num cell-total" data-bonus-total></td>
+    `;
+    body.appendChild(tr);
+    recalcBonusRow(tr);
+  });
+
+  recalcBonusTotals();
+}
+
+function readBonusRow(tr) {
+  const get = (field) => num(tr.querySelector(`input[data-bfield="${field}"]`).value);
+  return {
+    full_script: get("full_script"),
+    rebuttal: get("rebuttal"),
+    team: get("team"),
+    individual: get("individual"),
+    extras: get("extras"),
+  };
+}
+
+function recalcBonusRow(tr) {
+  const b = readBonusRow(tr);
+  tr.querySelector("[data-bonus-total]").textContent = fmt(calcBonusTotal(b));
+}
+
+function recalcBonusTotals() {
+  const body = $("bonuses-body");
+  const sums = { fs: 0, reb: 0, team: 0, ind: 0, extras: 0, total: 0 };
+  body.querySelectorAll("tr").forEach((tr) => {
+    if (!tr.dataset.bonusUser) return;
+    const b = readBonusRow(tr);
+    sums.fs += b.full_script;
+    sums.reb += b.rebuttal;
+    sums.team += b.team;
+    sums.ind += b.individual;
+    sums.extras += b.extras;
+    sums.total += calcBonusTotal(b);
+  });
+  $("bonuses-foot").innerHTML = `
+    <tr>
+      <td>ALL MEMBERS</td>
+      <td class="col-num">${sums.fs}</td>
+      <td class="col-num">${sums.reb}</td>
+      <td class="col-num">${sums.team}</td>
+      <td class="col-num">${sums.ind}</td>
+      <td class="col-num">${fmt(sums.extras)}</td>
+      <td class="col-num cell-total">${fmt(sums.total)}</td>
+    </tr>
+  `;
+}
+
+let bonusTimers = {};
+$("bonuses-body").addEventListener("input", (e) => {
+  const input = e.target;
+  if (!input.classList.contains("bonus-cell")) return;
+
+  const tr = input.closest("tr");
+  recalcBonusRow(tr);
+  recalcBonusTotals();
+
+  const bonusUserId = tr.dataset.bonusUser;
+  const mKey = bonusMonthKey(bonusMonth);
+  setBonusSaveStatus("saving", "Saving…");
+
+  clearTimeout(bonusTimers[bonusUserId]);
+  bonusTimers[bonusUserId] = setTimeout(async () => {
+    const b = readBonusRow(tr);
+    const { error } = await db.from("bonuses").upsert(
+      { user_id: bonusUserId, month: mKey, ...b },
+      { onConflict: "user_id,month" }
+    );
+    if (error) {
+      setBonusSaveStatus("error", "Save failed — " + error.message);
+      toast("Bonus save failed: " + error.message, true);
+      return;
+    }
+    setBonusSaveStatus("saved", "All changes saved");
   }, 700);
 });
 
