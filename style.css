@@ -650,3 +650,6 @@ td.cell-payout.paid { color: var(--c-fv); }
   .team-row { flex-wrap: wrap; gap: 8px; }
   .team-row-summary { margin-left: 0; }
 }
+
+/* ════════════ UPDATE 7: non-chatter role ════════════ */
+.role-pill.non_chatter { background: rgba(138,146,166,0.14); color: var(--text-dim); }

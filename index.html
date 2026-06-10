@@ -97,7 +97,8 @@
       <div class="invite-row">
         <input type="email" id="invite-email" placeholder="member@email.com">
         <select id="invite-role">
-          <option value="member">Member</option>
+          <option value="member">Chatter</option>
+          <option value="non_chatter">Non-Chatter</option>
           <option value="admin">Admin</option>
         </select>
         <button id="btn-invite" class="btn btn-primary" type="button">Send invite</button>
@@ -212,7 +213,7 @@
     </div>
 
     <section class="panel">
-      <h3>Monthly summary — all members</h3>
+      <h3>Monthly summary — Chatters</h3>
       <div class="table-scroll">
         <table class="sheet" style="min-width: 1150px;">
           <thead>
@@ -231,6 +232,27 @@
           </thead>
           <tbody id="payroll-body"></tbody>
           <tfoot id="payroll-foot"></tfoot>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>Monthly summary — Non-Chatters</h3>
+      <div class="table-scroll">
+        <table class="sheet plain" style="min-width: 800px;">
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>Submitted</th>
+              <th class="col-num th-hours">Hrs 1–14</th>
+              <th class="col-num th-hours">Hrs 15–end</th>
+              <th class="col-num th-payout">Pay on 15th $</th>
+              <th class="col-num th-payout">Pay on 1st $</th>
+              <th class="col-num">Month Total $</th>
+            </tr>
+          </thead>
+          <tbody id="payroll-nc-body"></tbody>
+          <tfoot id="payroll-nc-foot"></tfoot>
         </table>
       </div>
     </section>

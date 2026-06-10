@@ -64,6 +64,16 @@ function num(v) {
   return isNaN(n) ? 0 : n;
 }
 
+function roleLabel(role) {
+  if (role === "member") return "Chatter";
+  if (role === "non_chatter") return "Non-Chatter";
+  return "Admin";
+}
+
+function isNonChatter(profile) {
+  return profile.role === "non_chatter";
+}
+
 function toast(msg, isError = false) {
   const t = $("toast");
   t.textContent = msg;
@@ -282,6 +292,15 @@ const SHEET_HEAD = `
   </tr>
 `;
 
+// non-chatters: hourly only, no sales columns
+const NC_SHEET_HEAD = `
+  <tr>
+    <th class="col-date">Date</th>
+    <th class="col-num th-hours">Hours</th>
+    <th class="col-num th-pay">Hours $</th>
+  </tr>
+`;
+
 async function renderUserSheet(container, profile, monthDate, mode) {
   container.dataset.userId = profile.id;
   container.dataset.mode = mode;
@@ -310,6 +329,7 @@ async function renderUserSheet(container, profile, monthDate, mode) {
     section.className = "panel sheet-section" + (submittedAt && !isAdmin ? " locked" : "");
     section.dataset.period = pKey;
     section.dataset.half = String(half);
+    if (isNonChatter(profile)) section.dataset.nc = "1";
 
     // header
     const head = document.createElement("div");
@@ -324,8 +344,8 @@ async function renderUserSheet(container, profile, monthDate, mode) {
     const scroll = document.createElement("div");
     scroll.className = "table-scroll";
     const table = document.createElement("table");
-    table.className = "sheet";
-    table.innerHTML = `<thead>${SHEET_HEAD}</thead>`;
+    table.className = "sheet" + (isNonChatter(profile) ? " plain" : "");
+    table.innerHTML = `<thead>${isNonChatter(profile) ? NC_SHEET_HEAD : SHEET_HEAD}</thead>`;
     const tbody = document.createElement("tbody");
     tbody.className = "half-body";
 
@@ -342,21 +362,29 @@ async function renderUserSheet(container, profile, monthDate, mode) {
 
       const label = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
 
-      tr.innerHTML = `
-        <td class="col-date">${label}</td>
-        <td class="col-num"><input class="cell hours" data-field="hours" type="number" min="0" step="0.5" value="${row.hours || ""}" placeholder="–" ${dis}></td>
-        <td class="col-num"><input class="cell" data-field="of_gross" type="number" min="0" step="0.01" value="${row.of_gross || ""}" placeholder="–" ${dis}></td>
-        <td class="col-num net-of" data-cell="of-net"></td>
-        <td class="col-num"><input class="cell" data-field="fv_gross" type="number" min="0" step="0.01" value="${row.fv_gross || ""}" placeholder="–" ${dis}></td>
-        <td class="col-num net-fv" data-cell="fv-net"></td>
-        <td class="col-num"><input class="cell" data-field="slushy_gross" type="number" min="0" step="0.01" value="${row.slushy_gross || ""}" placeholder="–" ${dis}></td>
-        <td class="col-num net-slushy" data-cell="slushy-net"></td>
-        <td class="col-num"><input class="cell" data-field="fansly_gross" type="number" min="0" step="0.01" value="${row.fansly_gross || ""}" placeholder="–" ${dis}></td>
-        <td class="col-num net-fansly" data-cell="fansly-net"></td>
-        <td class="col-num cell-total" data-cell="total"></td>
-        <td class="col-num cell-comm" data-cell="comm"></td>
-        <td class="col-num cell-pay" data-cell="pay"></td>
-      `;
+      if (isNonChatter(profile)) {
+        tr.innerHTML = `
+          <td class="col-date">${label}</td>
+          <td class="col-num"><input class="cell hours" data-field="hours" type="number" min="0" step="0.5" value="${row.hours || ""}" placeholder="–" ${dis}></td>
+          <td class="col-num cell-pay" data-cell="pay"></td>
+        `;
+      } else {
+        tr.innerHTML = `
+          <td class="col-date">${label}</td>
+          <td class="col-num"><input class="cell hours" data-field="hours" type="number" min="0" step="0.5" value="${row.hours || ""}" placeholder="–" ${dis}></td>
+          <td class="col-num"><input class="cell" data-field="of_gross" type="number" min="0" step="0.01" value="${row.of_gross || ""}" placeholder="–" ${dis}></td>
+          <td class="col-num net-of" data-cell="of-net"></td>
+          <td class="col-num"><input class="cell" data-field="fv_gross" type="number" min="0" step="0.01" value="${row.fv_gross || ""}" placeholder="–" ${dis}></td>
+          <td class="col-num net-fv" data-cell="fv-net"></td>
+          <td class="col-num"><input class="cell" data-field="slushy_gross" type="number" min="0" step="0.01" value="${row.slushy_gross || ""}" placeholder="–" ${dis}></td>
+          <td class="col-num net-slushy" data-cell="slushy-net"></td>
+          <td class="col-num"><input class="cell" data-field="fansly_gross" type="number" min="0" step="0.01" value="${row.fansly_gross || ""}" placeholder="–" ${dis}></td>
+          <td class="col-num net-fansly" data-cell="fansly-net"></td>
+          <td class="col-num cell-total" data-cell="total"></td>
+          <td class="col-num cell-comm" data-cell="comm"></td>
+          <td class="col-num cell-pay" data-cell="pay"></td>
+        `;
+      }
       tbody.appendChild(tr);
     }
 
@@ -423,6 +451,10 @@ function recalcDisplayRow(tr, profile) {
     const input = tr.querySelector(`input[data-field="${field}"]`);
     return input ? input.value : 0;
   };
+  const setCell = (name, val) => {
+    const el = tr.querySelector(`[data-cell="${name}"]`);
+    if (el) el.textContent = val;
+  };
   const calc = calcRow(
     {
       hours: get("hours"),
@@ -433,13 +465,13 @@ function recalcDisplayRow(tr, profile) {
     },
     profile
   );
-  tr.querySelector('[data-cell="of-net"]').textContent = fmt(calc.ofNet);
-  tr.querySelector('[data-cell="fv-net"]').textContent = fmt(calc.fvNet);
-  tr.querySelector('[data-cell="slushy-net"]').textContent = fmt(calc.slushyNet);
-  tr.querySelector('[data-cell="fansly-net"]').textContent = fmt(calc.fanslyNet);
-  tr.querySelector('[data-cell="total"]').textContent = fmt(calc.total);
-  tr.querySelector('[data-cell="comm"]').textContent = fmt(calc.commission);
-  tr.querySelector('[data-cell="pay"]').textContent = fmt(calc.hoursPay);
+  setCell("of-net", fmt(calc.ofNet));
+  setCell("fv-net", fmt(calc.fvNet));
+  setCell("slushy-net", fmt(calc.slushyNet));
+  setCell("fansly-net", fmt(calc.fanslyNet));
+  setCell("total", fmt(calc.total));
+  setCell("comm", fmt(calc.commission));
+  setCell("pay", fmt(calc.hoursPay));
 }
 
 function recalcHalfTotals(section, profile) {
@@ -448,7 +480,10 @@ function recalcHalfTotals(section, profile) {
   const sums = { hours: 0, of: 0, fv: 0, slushy: 0, fansly: 0, ofNet: 0, fvNet: 0, slushyNet: 0, fanslyNet: 0, total: 0, comm: 0, pay: 0 };
 
   tbody.querySelectorAll("tr").forEach((tr) => {
-    const get = (field) => num(tr.querySelector(`input[data-field="${field}"]`).value);
+    const get = (field) => {
+      const el = tr.querySelector(`input[data-field="${field}"]`);
+      return el ? num(el.value) : 0;
+    };
     const row = {
       hours: get("hours"),
       of_gross: get("of_gross"),
@@ -470,6 +505,17 @@ function recalcHalfTotals(section, profile) {
     sums.comm += calc.commission;
     sums.pay += calc.hoursPay;
   });
+
+  if (section.dataset.nc === "1") {
+    tfoot.innerHTML = `
+      <tr>
+        <td>TOTAL</td>
+        <td class="col-num">${sums.hours}</td>
+        <td class="col-num cell-pay">${fmt(sums.pay)}</td>
+      </tr>
+    `;
+    return;
+  }
 
   tfoot.innerHTML = `
     <tr>
@@ -515,7 +561,10 @@ function handleSheetInput(e) {
 }
 
 async function saveSheetRow(tr, targetUserId, date) {
-  const get = (field) => num(tr.querySelector(`input[data-field="${field}"]`).value);
+  const get = (field) => {
+    const el = tr.querySelector(`input[data-field="${field}"]`);
+    return el ? num(el.value) : 0;
+  };
 
   const payload = {
     user_id: targetUserId,
@@ -677,13 +726,15 @@ async function renderTeam() {
 
   membersCache.forEach((m) => {
     const tr = document.createElement("tr");
+    const commCell = isNonChatter(m)
+      ? `<td class="col-num"><span class="hint">—</span></td><td><span class="hint">hourly only</span></td>`
+      : `<td class="col-num"><input class="cell rate" data-member="${m.id}" data-rate-field="commission_rate" type="number" min="0" step="0.001" value="${m.commission_rate}"></td><td><span class="hint">commission as decimal — 0.03 = 3%</span></td>`;
     tr.innerHTML = `
       <td>${m.name || "—"}</td>
       <td>${m.email}</td>
-      <td><span class="role-pill ${m.role}">${m.role}</span></td>
+      <td><span class="role-pill ${m.role}">${roleLabel(m.role)}</span></td>
       <td class="col-num"><input class="cell rate" data-member="${m.id}" data-rate-field="hourly_rate" type="number" min="0" step="0.25" value="${m.hourly_rate}"></td>
-      <td class="col-num"><input class="cell rate" data-member="${m.id}" data-rate-field="commission_rate" type="number" min="0" step="0.001" value="${m.commission_rate}"></td>
-      <td><span class="hint">commission as decimal — 0.03 = 3%</span></td>
+      ${commCell}
     `;
     body.appendChild(tr);
   });
@@ -819,8 +870,11 @@ async function renderTeamSales() {
   }
   membersCache = members || [];
 
-  // populate the create-form chips (all unchecked)
-  $("new-team-chips").innerHTML = membersCache.map((m) => memberChipHtml(m, false)).join("");
+  // populate the create-form chips (all unchecked, chatters only)
+  $("new-team-chips").innerHTML = membersCache
+    .filter((m) => !isNonChatter(m))
+    .map((m) => memberChipHtml(m, false))
+    .join("");
 
   if (!teams || !teams.length) {
     container.innerHTML = `<p class="hint">No teams yet — create your first one above.</p>`;
@@ -907,7 +961,7 @@ async function renderTeamSales() {
         </div>
 
         <div class="member-chips">
-          ${membersCache.map((m) => memberChipHtml(m, memberIds.includes(m.id))).join("")}
+          ${membersCache.filter((m) => !isNonChatter(m)).map((m) => memberChipHtml(m, memberIds.includes(m.id))).join("")}
         </div>
 
         <div class="table-scroll">
@@ -1059,7 +1113,7 @@ async function renderBonuses() {
   }
   membersCache = members || [];
 
-  membersCache.forEach((m) => {
+  membersCache.filter((m) => !isNonChatter(m)).forEach((m) => {
     const b = (bonuses || []).find((x) => x.user_id === m.id) ||
       { full_script: "", rebuttal: "", team: "", individual: "", extras: "" };
 
@@ -1199,6 +1253,9 @@ async function renderPayroll() {
   membersCache = members || [];
 
   const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, bonus: 0, on15: 0, on1: 0, total: 0 };
+  const ncGrand = { h1Hours: 0, h2Hours: 0, on15: 0, on1: 0, total: 0 };
+  const ncBody = $("payroll-nc-body");
+  ncBody.innerHTML = "";
 
   membersCache.forEach((m) => {
     const rows = (sheets || []).filter((s) => s.user_id === m.id);
@@ -1213,11 +1270,57 @@ async function renderPayroll() {
       else { h2Hours += num(r.hours); }
     });
 
+    const h1Pay = h1Hours * num(m.hourly_rate);
+    const h2Pay = h2Hours * num(m.hourly_rate);
+
+    const h1Sub = (subs || []).some((s) => s.user_id === m.id && s.period === pKeys[0]);
+    const h2Sub = (subs || []).some((s) => s.user_id === m.id && s.period === pKeys[1]);
+    const badge = (ok, label) =>
+      `<span class="sub-badge ${ok ? "ok" : ""}" title="${label}">${ok ? "✓" : "–"}</span>`;
+
+    const paid15 = (pays || []).some((p) => p.user_id === m.id && p.period === pay15Key);
+    const paid1 = (pays || []).some((p) => p.user_id === m.id && p.period === pay1Key);
+
+    // ── NON-CHATTERS: hourly only ──
+    if (isNonChatter(m)) {
+      const payOn15 = h1Pay;
+      const payOn1 = h2Pay;
+      const monthTotal = payOn15 + payOn1;
+
+      ncGrand.h1Hours += h1Hours;
+      ncGrand.h2Hours += h2Hours;
+      ncGrand.on15 += payOn15;
+      ncGrand.on1 += payOn1;
+      ncGrand.total += monthTotal;
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><button class="member-link" data-view-member="${m.id}" type="button">${m.name || m.email}</button></td>
+        <td>${badge(h1Sub, "1st half")} ${badge(h2Sub, "2nd half")}</td>
+        <td class="col-num">${h1Hours}</td>
+        <td class="col-num">${h2Hours}</td>
+        <td class="col-num cell-payout${paid15 ? " paid" : ""}">
+          <label class="paid-wrap" title="Mark paid">
+            <strong>${fmt(payOn15)}</strong>
+            <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay15Key}" ${paid15 ? "checked" : ""}>
+          </label>
+        </td>
+        <td class="col-num cell-payout${paid1 ? " paid" : ""}">
+          <label class="paid-wrap" title="Mark paid">
+            <strong>${fmt(payOn1)}</strong>
+            <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay1Key}" ${paid1 ? "checked" : ""}>
+          </label>
+        </td>
+        <td class="col-num"><strong>${fmt(monthTotal)}</strong></td>
+      `;
+      ncBody.appendChild(tr);
+      return;
+    }
+
+    // ── CHATTERS: full payroll ──
     const bonusRow = (monthBonuses || []).find((b) => b.user_id === m.id);
     const bonusTotal = bonusRow ? calcBonusTotal(bonusRow) : 0;
 
-    const h1Pay = h1Hours * num(m.hourly_rate);
-    const h2Pay = h2Hours * num(m.hourly_rate);
     const payOn15 = h1Pay;                              // 15th: hours 1–14 only
     const payOn1 = h2Pay + commMonth + bonusTotal;      // 1st: hours 15–end + ALL commission + bonuses
     const monthTotal = payOn15 + payOn1;
@@ -1230,14 +1333,6 @@ async function renderPayroll() {
     grand.on15 += payOn15;
     grand.on1 += payOn1;
     grand.total += monthTotal;
-
-    const h1Sub = (subs || []).some((s) => s.user_id === m.id && s.period === pKeys[0]);
-    const h2Sub = (subs || []).some((s) => s.user_id === m.id && s.period === pKeys[1]);
-    const badge = (ok, label) =>
-      `<span class="sub-badge ${ok ? "ok" : ""}" title="${label}">${ok ? "✓" : "–"}</span>`;
-
-    const paid15 = (pays || []).some((p) => p.user_id === m.id && p.period === pay15Key);
-    const paid1 = (pays || []).some((p) => p.user_id === m.id && p.period === pay1Key);
 
     const tr = document.createElement("tr");
     tr.innerHTML = `
@@ -1267,7 +1362,7 @@ async function renderPayroll() {
 
   $("payroll-foot").innerHTML = `
     <tr>
-      <td>ALL MEMBERS</td>
+      <td>ALL CHATTERS</td>
       <td></td>
       <td class="col-num">${grand.h1Hours}</td>
       <td class="col-num">${grand.h2Hours}</td>
@@ -1279,10 +1374,22 @@ async function renderPayroll() {
       <td class="col-num"><strong>${fmt(grand.total)}</strong></td>
     </tr>
   `;
+
+  $("payroll-nc-foot").innerHTML = `
+    <tr>
+      <td>ALL NON-CHATTERS</td>
+      <td></td>
+      <td class="col-num">${ncGrand.h1Hours}</td>
+      <td class="col-num">${ncGrand.h2Hours}</td>
+      <td class="col-num cell-payout"><strong>${fmt(ncGrand.on15)}</strong></td>
+      <td class="col-num cell-payout"><strong>${fmt(ncGrand.on1)}</strong></td>
+      <td class="col-num"><strong>${fmt(ncGrand.total)}</strong></td>
+    </tr>
+  `;
 }
 
-// toggle paid checkboxes
-$("payroll-body").addEventListener("change", async (e) => {
+// toggle paid checkboxes (both chatter and non-chatter tables)
+async function handlePaidToggle(e) {
   const check = e.target;
   if (!check.classList.contains("paid-check")) return;
 
@@ -1309,10 +1416,12 @@ $("payroll-body").addEventListener("change", async (e) => {
     if (cell) cell.classList.remove("paid");
     toast("Unmarked");
   }
-});
+}
+$("payroll-body").addEventListener("change", handlePaidToggle);
+$("payroll-nc-body").addEventListener("change", handlePaidToggle);
 
 // open a member's editable sheet (click again to minimize)
-$("payroll-body").addEventListener("click", async (e) => {
+async function handleMemberLinkClick(e) {
   const btn = e.target.closest("[data-view-member]");
   if (!btn) return;
 
@@ -1333,7 +1442,9 @@ $("payroll-body").addEventListener("click", async (e) => {
 
   await renderUserSheet($("member-sheet-sections"), member, payMonth, "admin");
   $("member-sheet-panel").scrollIntoView({ behavior: "smooth" });
-});
+}
+$("payroll-body").addEventListener("click", handleMemberLinkClick);
+$("payroll-nc-body").addEventListener("click", handleMemberLinkClick);
 
 // ── Boot ────────────────────────────────────────────────────
 init();
