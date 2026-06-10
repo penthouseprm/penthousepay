@@ -1,17 +1,19 @@
 // ============================================================
 // TIMESHEETS — Penthouse Promotions
 // Vanilla JS + Supabase
+// Update 1: pay periods (1–14 / 15–end), submit & lock
 // ============================================================
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ── State ───────────────────────────────────────────────────
-let currentUser = null;      // supabase auth user
-let currentProfile = null;   // row from profiles
-let sheetMonth = startOfMonth(new Date());   // my timesheet month
-let payMonth = startOfMonth(new Date());     // payroll month
-let saveTimers = {};         // per-date debounce timers
+let currentUser = null;
+let currentProfile = null;
+let sheetMonth = startOfMonth(new Date());
+let payMonth = startOfMonth(new Date());
+let saveTimers = {};
 let membersCache = [];
+let memberSheetTarget = null; // profile being edited by admin in payroll
 
 // ── Helpers ─────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -36,6 +38,19 @@ function monthRange(d) {
   const first = isoDate(d.getFullYear(), d.getMonth(), 1);
   const last = isoDate(d.getFullYear(), d.getMonth(), daysInMonth(d));
   return { first, last };
+}
+
+// 'YYYY-MM-H1' or 'YYYY-MM-H2'
+function periodKey(monthDate, half) {
+  const m = String(monthDate.getMonth() + 1).padStart(2, "0");
+  return `${monthDate.getFullYear()}-${m}-H${half}`;
+}
+
+function halfLabel(monthDate, half) {
+  const name = monthDate.toLocaleDateString("en-US", { month: "long" });
+  return half === 1
+    ? `${name} 1st – 14th`
+    : `${name} 15th – ${daysInMonth(monthDate)}th`;
 }
 
 function fmt(n) {
@@ -134,7 +149,6 @@ $("btn-signup").addEventListener("click", async () => {
   $("btn-signup").disabled = false;
 
   if (error) {
-    // Supabase wraps trigger exceptions — surface invite errors clearly
     if (error.message.toLowerCase().includes("invite")) {
       showAuthError("No invite found for this email. Ask an admin to invite you first.");
     } else {
@@ -150,7 +164,6 @@ $("btn-logout").addEventListener("click", async () => {
   location.reload();
 });
 
-// Allow Enter key to submit auth forms
 $("login-password").addEventListener("keydown", (e) => {
   if (e.key === "Enter") $("btn-login").click();
 });
@@ -197,7 +210,6 @@ async function init() {
   renderMySheet();
 }
 
-// nav switching
 document.querySelectorAll(".nav-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
@@ -213,17 +225,8 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
 });
 
 // ════════════════════════════════════════════════════════════
-// MY TIMESHEET
+// DATA LOADERS
 // ════════════════════════════════════════════════════════════
-$("month-prev").addEventListener("click", () => {
-  sheetMonth = new Date(sheetMonth.getFullYear(), sheetMonth.getMonth() - 1, 1);
-  renderMySheet();
-});
-$("month-next").addEventListener("click", () => {
-  sheetMonth = new Date(sheetMonth.getFullYear(), sheetMonth.getMonth() + 1, 1);
-  renderMySheet();
-});
-
 async function loadMonthRows(userId, monthDate) {
   const { first, last } = monthRange(monthDate);
   const { data, error } = await db
@@ -238,54 +241,180 @@ async function loadMonthRows(userId, monthDate) {
   return map;
 }
 
-async function renderMySheet() {
-  $("month-label").textContent = monthLabel(sheetMonth);
-  setSaveStatus("", "");
-
-  const rows = await loadMonthRows(currentUser.id, sheetMonth);
-  const body = $("sheet-body");
-  body.innerHTML = "";
-
-  const year = sheetMonth.getFullYear();
-  const monthIdx = sheetMonth.getMonth();
-  const total = daysInMonth(sheetMonth);
-
-  for (let day = 1; day <= total; day++) {
-    const date = isoDate(year, monthIdx, day);
-    const row = rows[date] || { hours: "", of_gross: "", fv_gross: "", slushy_gross: "", fansly_gross: "" };
-    const dateObj = new Date(year, monthIdx, day);
-    const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
-
-    const tr = document.createElement("tr");
-    tr.dataset.date = date;
-    if (isWeekend) tr.classList.add("weekend");
-
-    const label = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
-
-    tr.innerHTML = `
-      <td class="col-date">${label}</td>
-      <td class="col-num"><input class="cell hours" data-field="hours" type="number" min="0" step="0.5" value="${row.hours || ""}" placeholder="–"></td>
-      <td class="col-num"><input class="cell" data-field="of_gross" type="number" min="0" step="0.01" value="${row.of_gross || ""}" placeholder="–"></td>
-      <td class="col-num net-of" data-cell="of-net"></td>
-      <td class="col-num"><input class="cell" data-field="fv_gross" type="number" min="0" step="0.01" value="${row.fv_gross || ""}" placeholder="–"></td>
-      <td class="col-num net-fv" data-cell="fv-net"></td>
-      <td class="col-num"><input class="cell" data-field="slushy_gross" type="number" min="0" step="0.01" value="${row.slushy_gross || ""}" placeholder="–"></td>
-      <td class="col-num net-slushy" data-cell="slushy-net"></td>
-      <td class="col-num"><input class="cell" data-field="fansly_gross" type="number" min="0" step="0.01" value="${row.fansly_gross || ""}" placeholder="–"></td>
-      <td class="col-num net-fansly" data-cell="fansly-net"></td>
-      <td class="col-num cell-total" data-cell="total"></td>
-      <td class="col-num cell-comm" data-cell="comm"></td>
-      <td class="col-num cell-pay" data-cell="pay"></td>
-    `;
-    body.appendChild(tr);
-    recalcDisplayRow(tr);
-  }
-
-  recalcTotals();
+// returns { 'YYYY-MM-H1': submitted_at, 'YYYY-MM-H2': submitted_at }
+async function loadSubmissions(userId, monthDate) {
+  const keys = [periodKey(monthDate, 1), periodKey(monthDate, 2)];
+  const { data, error } = await db
+    .from("submissions")
+    .select("*")
+    .eq("user_id", userId)
+    .in("period", keys);
+  if (error) { toast("Failed to load submissions: " + error.message, true); return {}; }
+  const map = {};
+  (data || []).forEach((s) => { map[s.period] = s.submitted_at; });
+  return map;
 }
 
-// recalc a single row's computed cells from its inputs
-function recalcDisplayRow(tr) {
+// ════════════════════════════════════════════════════════════
+// SHARED SHEET RENDERER
+// Renders two half-month sections into a container.
+// mode: "self" (member's own sheet) | "admin" (admin editing a member)
+// ════════════════════════════════════════════════════════════
+const SHEET_HEAD = `
+  <tr>
+    <th class="col-date">Date</th>
+    <th class="col-num th-hours">Hours</th>
+    <th class="col-num th-of">OF Gross $</th>
+    <th class="col-num th-of net">OF Net $</th>
+    <th class="col-num th-fv">FV Gross $</th>
+    <th class="col-num th-fv net">FV Net $</th>
+    <th class="col-num th-slushy">Slushy Gross $</th>
+    <th class="col-num th-slushy net">Slushy Net $</th>
+    <th class="col-num th-fansly">Fansly Gross $</th>
+    <th class="col-num th-fansly net">Fansly Net $</th>
+    <th class="col-num th-total">Total Sales</th>
+    <th class="col-num th-comm">Commission $</th>
+    <th class="col-num th-pay">Hours $</th>
+  </tr>
+`;
+
+async function renderUserSheet(container, profile, monthDate, mode) {
+  container.dataset.userId = profile.id;
+  container.dataset.mode = mode;
+  container.innerHTML = "";
+
+  const [rows, subs] = await Promise.all([
+    loadMonthRows(profile.id, monthDate),
+    loadSubmissions(profile.id, monthDate),
+  ]);
+
+  const year = monthDate.getFullYear();
+  const monthIdx = monthDate.getMonth();
+  const lastDay = daysInMonth(monthDate);
+
+  [1, 2].forEach((half) => {
+    const pKey = periodKey(monthDate, half);
+    const submittedAt = subs[pKey] || null;
+    const isAdmin = currentProfile.role === "admin";
+    // members can't edit a submitted period; admins always can
+    const editable = isAdmin || !submittedAt;
+
+    const firstDay = half === 1 ? 1 : 15;
+    const endDay = half === 1 ? 14 : lastDay;
+
+    const section = document.createElement("section");
+    section.className = "panel sheet-section" + (submittedAt && !isAdmin ? " locked" : "");
+    section.dataset.period = pKey;
+    section.dataset.half = String(half);
+
+    // header
+    const head = document.createElement("div");
+    head.className = "section-head";
+    const statusHtml = submittedAt
+      ? `<span class="status-pill submitted">Submitted ${new Date(submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>`
+      : `<span class="status-pill open">Not submitted</span>`;
+    head.innerHTML = `<h3>${halfLabel(monthDate, half)}</h3>${statusHtml}`;
+    section.appendChild(head);
+
+    // table
+    const scroll = document.createElement("div");
+    scroll.className = "table-scroll";
+    const table = document.createElement("table");
+    table.className = "sheet";
+    table.innerHTML = `<thead>${SHEET_HEAD}</thead>`;
+    const tbody = document.createElement("tbody");
+    tbody.className = "half-body";
+
+    for (let day = firstDay; day <= endDay; day++) {
+      const date = isoDate(year, monthIdx, day);
+      const row = rows[date] || { hours: "", of_gross: "", fv_gross: "", slushy_gross: "", fansly_gross: "" };
+      const dateObj = new Date(year, monthIdx, day);
+      const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+      const dis = editable ? "" : "disabled";
+
+      const tr = document.createElement("tr");
+      tr.dataset.date = date;
+      if (isWeekend) tr.classList.add("weekend");
+
+      const label = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
+
+      tr.innerHTML = `
+        <td class="col-date">${label}</td>
+        <td class="col-num"><input class="cell hours" data-field="hours" type="number" min="0" step="0.5" value="${row.hours || ""}" placeholder="–" ${dis}></td>
+        <td class="col-num"><input class="cell" data-field="of_gross" type="number" min="0" step="0.01" value="${row.of_gross || ""}" placeholder="–" ${dis}></td>
+        <td class="col-num net-of" data-cell="of-net"></td>
+        <td class="col-num"><input class="cell" data-field="fv_gross" type="number" min="0" step="0.01" value="${row.fv_gross || ""}" placeholder="–" ${dis}></td>
+        <td class="col-num net-fv" data-cell="fv-net"></td>
+        <td class="col-num"><input class="cell" data-field="slushy_gross" type="number" min="0" step="0.01" value="${row.slushy_gross || ""}" placeholder="–" ${dis}></td>
+        <td class="col-num net-slushy" data-cell="slushy-net"></td>
+        <td class="col-num"><input class="cell" data-field="fansly_gross" type="number" min="0" step="0.01" value="${row.fansly_gross || ""}" placeholder="–" ${dis}></td>
+        <td class="col-num net-fansly" data-cell="fansly-net"></td>
+        <td class="col-num cell-total" data-cell="total"></td>
+        <td class="col-num cell-comm" data-cell="comm"></td>
+        <td class="col-num cell-pay" data-cell="pay"></td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    table.appendChild(tbody);
+    const tfoot = document.createElement("tfoot");
+    tfoot.className = "half-foot";
+    table.appendChild(tfoot);
+    scroll.appendChild(table);
+    section.appendChild(scroll);
+
+    // recalc all rows + totals
+    tbody.querySelectorAll("tr").forEach((tr) => recalcDisplayRow(tr, profile));
+    recalcHalfTotals(section, profile);
+
+    // submit / lock controls
+    const bar = document.createElement("div");
+    bar.className = "submit-bar";
+
+    if (mode === "self") {
+      if (submittedAt) {
+        bar.innerHTML = `<span class="hint">This period is locked. Contact an admin if something needs changing.</span>`;
+      } else {
+        const btn = document.createElement("button");
+        btn.className = "btn btn-primary";
+        btn.type = "button";
+        btn.textContent = `Submit ${halfLabel(monthDate, half)}`;
+        btn.addEventListener("click", () => submitPeriod(profile.id, pKey, btn));
+        bar.appendChild(btn);
+        const note = document.createElement("span");
+        note.className = "hint";
+        note.textContent = "Submitting locks these figures — only an admin can change them after.";
+        bar.appendChild(note);
+      }
+    } else {
+      // admin controls on member sheets
+      if (submittedAt) {
+        const btn = document.createElement("button");
+        btn.className = "btn btn-danger";
+        btn.type = "button";
+        btn.textContent = "Unlock period";
+        btn.addEventListener("click", () => unlockPeriod(profile.id, pKey));
+        bar.appendChild(btn);
+        const note = document.createElement("span");
+        note.className = "hint";
+        note.textContent = "Unlocking lets the member edit this period again.";
+        bar.appendChild(note);
+      } else {
+        const btn = document.createElement("button");
+        btn.className = "btn btn-ghost";
+        btn.type = "button";
+        btn.textContent = "Mark as submitted";
+        btn.addEventListener("click", () => submitPeriod(profile.id, pKey, btn, true));
+        bar.appendChild(btn);
+      }
+    }
+    section.appendChild(bar);
+
+    container.appendChild(section);
+  });
+}
+
+function recalcDisplayRow(tr, profile) {
   const get = (field) => {
     const input = tr.querySelector(`input[data-field="${field}"]`);
     return input ? input.value : 0;
@@ -298,7 +427,7 @@ function recalcDisplayRow(tr) {
       slushy_gross: get("slushy_gross"),
       fansly_gross: get("fansly_gross"),
     },
-    currentProfile
+    profile
   );
   tr.querySelector('[data-cell="of-net"]').textContent = fmt(calc.ofNet);
   tr.querySelector('[data-cell="fv-net"]').textContent = fmt(calc.fvNet);
@@ -309,11 +438,12 @@ function recalcDisplayRow(tr) {
   tr.querySelector('[data-cell="pay"]').textContent = fmt(calc.hoursPay);
 }
 
-function recalcTotals() {
-  const body = $("sheet-body");
+function recalcHalfTotals(section, profile) {
+  const tbody = section.querySelector(".half-body");
+  const tfoot = section.querySelector(".half-foot");
   const sums = { hours: 0, of: 0, fv: 0, slushy: 0, fansly: 0, ofNet: 0, fvNet: 0, slushyNet: 0, fanslyNet: 0, total: 0, comm: 0, pay: 0 };
 
-  body.querySelectorAll("tr").forEach((tr) => {
+  tbody.querySelectorAll("tr").forEach((tr) => {
     const get = (field) => num(tr.querySelector(`input[data-field="${field}"]`).value);
     const row = {
       hours: get("hours"),
@@ -322,7 +452,7 @@ function recalcTotals() {
       slushy_gross: get("slushy_gross"),
       fansly_gross: get("fansly_gross"),
     };
-    const calc = calcRow(row, currentProfile);
+    const calc = calcRow(row, profile);
     sums.hours += row.hours;
     sums.of += row.of_gross;
     sums.fv += row.fv_gross;
@@ -337,7 +467,7 @@ function recalcTotals() {
     sums.pay += calc.hoursPay;
   });
 
-  $("sheet-foot").innerHTML = `
+  tfoot.innerHTML = `
     <tr>
       <td>TOTAL</td>
       <td class="col-num">${sums.hours}</td>
@@ -356,27 +486,35 @@ function recalcTotals() {
   `;
 }
 
-// delegated input handler — recalc + debounced save per row
-$("sheet-body").addEventListener("input", (e) => {
+// shared delegated input handler for both sheet containers
+function handleSheetInput(e) {
   const input = e.target;
-  if (!input.classList.contains("cell")) return;
+  if (!input.classList.contains("cell") || input.disabled) return;
 
+  const container = e.currentTarget;
   const tr = input.closest("tr");
-  recalcDisplayRow(tr);
-  recalcTotals();
+  const section = input.closest(".sheet-section");
+  const targetUserId = container.dataset.userId;
+  const profile = targetUserId === currentUser.id
+    ? currentProfile
+    : (membersCache.find((m) => m.id === targetUserId) || currentProfile);
+
+  recalcDisplayRow(tr, profile);
+  recalcHalfTotals(section, profile);
 
   const date = tr.dataset.date;
+  const timerKey = targetUserId + ":" + date;
   setSaveStatus("saving", "Saving…");
 
-  clearTimeout(saveTimers[date]);
-  saveTimers[date] = setTimeout(() => saveSheetRow(tr, date), 700);
-});
+  clearTimeout(saveTimers[timerKey]);
+  saveTimers[timerKey] = setTimeout(() => saveSheetRow(tr, targetUserId, date), 700);
+}
 
-async function saveSheetRow(tr, date) {
+async function saveSheetRow(tr, targetUserId, date) {
   const get = (field) => num(tr.querySelector(`input[data-field="${field}"]`).value);
 
   const payload = {
-    user_id: currentUser.id,
+    user_id: targetUserId,
     entry_date: date,
     hours: get("hours"),
     of_gross: get("of_gross"),
@@ -392,16 +530,84 @@ async function saveSheetRow(tr, date) {
 
   if (error) {
     setSaveStatus("error", "Save failed — " + error.message);
+    toast("Save failed: " + error.message, true);
     return;
   }
   setSaveStatus("saved", "All changes saved");
 }
 
+// submit / unlock
+async function submitPeriod(userId, pKey, btn, byAdmin = false) {
+  const confirmMsg = byAdmin
+    ? "Mark this period as submitted? The member won't be able to edit it."
+    : "Submit this timesheet period? You won't be able to edit it after — only an admin can.";
+  if (!confirm(confirmMsg)) return;
+
+  if (btn) btn.disabled = true;
+  const { error } = await db.from("submissions").insert({ user_id: userId, period: pKey });
+  if (btn) btn.disabled = false;
+
+  if (error) {
+    if (error.code === "23505") {
+      toast("This period was already submitted.");
+    } else {
+      toast("Submit failed: " + error.message, true);
+      return;
+    }
+  } else {
+    toast("Period submitted and locked ✓");
+  }
+
+  // re-render whichever sheet is on screen
+  if (memberSheetTarget && userId === memberSheetTarget.id) {
+    renderUserSheet($("member-sheet-sections"), memberSheetTarget, payMonth, "admin");
+  }
+  if (userId === currentUser.id) renderMySheet();
+}
+
+async function unlockPeriod(userId, pKey) {
+  if (!confirm("Unlock this period so the member can edit it again?")) return;
+
+  const { error } = await db
+    .from("submissions")
+    .delete()
+    .eq("user_id", userId)
+    .eq("period", pKey);
+
+  if (error) { toast("Unlock failed: " + error.message, true); return; }
+  toast("Period unlocked");
+
+  if (memberSheetTarget && userId === memberSheetTarget.id) {
+    renderUserSheet($("member-sheet-sections"), memberSheetTarget, payMonth, "admin");
+  }
+  if (userId === currentUser.id) renderMySheet();
+}
+
+// ════════════════════════════════════════════════════════════
+// MY TIMESHEET
+// ════════════════════════════════════════════════════════════
+$("month-prev").addEventListener("click", () => {
+  sheetMonth = new Date(sheetMonth.getFullYear(), sheetMonth.getMonth() - 1, 1);
+  renderMySheet();
+});
+$("month-next").addEventListener("click", () => {
+  sheetMonth = new Date(sheetMonth.getFullYear(), sheetMonth.getMonth() + 1, 1);
+  renderMySheet();
+});
+
+async function renderMySheet() {
+  $("month-label").textContent = monthLabel(sheetMonth);
+  setSaveStatus("", "");
+  await renderUserSheet($("my-sheet-sections"), currentProfile, sheetMonth, "self");
+}
+
+$("my-sheet-sections").addEventListener("input", handleSheetInput);
+$("member-sheet-sections").addEventListener("input", handleSheetInput);
+
 // ════════════════════════════════════════════════════════════
 // TEAM (admin)
 // ════════════════════════════════════════════════════════════
 async function renderTeam() {
-  // invites
   const { data: invites, error: invErr } = await db
     .from("invites")
     .select("*")
@@ -426,7 +632,6 @@ async function renderTeam() {
     });
   }
 
-  // members
   const { data: members, error: memErr } = await db
     .from("profiles")
     .select("*")
@@ -469,7 +674,6 @@ $("btn-invite").addEventListener("click", async () => {
   renderTeam();
 });
 
-// delegated: revoke invite buttons
 $("invites-list").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-del-invite]");
   if (!btn) return;
@@ -479,7 +683,6 @@ $("invites-list").addEventListener("click", async (e) => {
   renderTeam();
 });
 
-// delegated: rate edits with debounce
 let rateTimers = {};
 $("members-body").addEventListener("input", (e) => {
   const input = e.target;
@@ -494,7 +697,6 @@ $("members-body").addEventListener("input", (e) => {
       .eq("id", input.dataset.member);
     if (error) { toast("Rate update failed: " + error.message, true); return; }
     toast("Rate updated");
-    // keep own profile in sync if editing self
     if (input.dataset.member === currentUser.id) {
       currentProfile[input.dataset.rateField] = num(input.value);
     }
@@ -516,52 +718,75 @@ $("pay-month-next").addEventListener("click", () => {
 async function renderPayroll() {
   $("pay-month-label").textContent = monthLabel(payMonth);
   $("member-sheet-panel").classList.add("hidden");
+  memberSheetTarget = null;
 
   const { first, last } = monthRange(payMonth);
+  const pKeys = [periodKey(payMonth, 1), periodKey(payMonth, 2)];
 
-  const [{ data: members, error: memErr }, { data: sheets, error: shErr }] = await Promise.all([
+  const [
+    { data: members, error: memErr },
+    { data: sheets, error: shErr },
+    { data: subs, error: subErr },
+  ] = await Promise.all([
     db.from("profiles").select("*").order("name", { ascending: true }),
     db.from("timesheets").select("*").gte("entry_date", first).lte("entry_date", last),
+    db.from("submissions").select("*").in("period", pKeys),
   ]);
 
   const body = $("payroll-body");
   body.innerHTML = "";
 
-  if (memErr || shErr) {
-    body.innerHTML = `<tr><td colspan="7">Failed to load payroll data.</td></tr>`;
+  if (memErr || shErr || subErr) {
+    body.innerHTML = `<tr><td colspan="9">Failed to load payroll data.</td></tr>`;
     return;
   }
   membersCache = members || [];
 
-  const grand = { hours: 0, total: 0, comm: 0, pay: 0, out: 0 };
+  const grand = { h1Hours: 0, h1Pay: 0, h2Hours: 0, h2Pay: 0, comm: 0, on15: 0, on1: 0, total: 0 };
 
   membersCache.forEach((m) => {
     const rows = (sheets || []).filter((s) => s.user_id === m.id);
-    const sums = { hours: 0, total: 0, comm: 0, pay: 0 };
-    rows.forEach((r) => {
-      const calc = calcRow(r, m);
-      sums.hours += num(r.hours);
-      sums.total += calc.total;
-      sums.comm += calc.commission;
-      sums.pay += calc.hoursPay;
-    });
-    const payout = sums.comm + sums.pay;
+    let h1Hours = 0, h2Hours = 0, commMonth = 0;
 
-    grand.hours += sums.hours;
-    grand.total += sums.total;
-    grand.comm += sums.comm;
-    grand.pay += sums.pay;
-    grand.out += payout;
+    rows.forEach((r) => {
+      const day = parseInt(r.entry_date.slice(8), 10);
+      const calc = calcRow(r, m);
+      commMonth += calc.commission;
+      if (day <= 14) { h1Hours += num(r.hours); }
+      else { h2Hours += num(r.hours); }
+    });
+
+    const h1Pay = h1Hours * num(m.hourly_rate);
+    const h2Pay = h2Hours * num(m.hourly_rate);
+    const payOn15 = h1Pay;                 // 15th: hours 1–14 only
+    const payOn1 = h2Pay + commMonth;      // 1st: hours 15–end + ALL commission
+    const monthTotal = payOn15 + payOn1;
+
+    grand.h1Hours += h1Hours;
+    grand.h1Pay += h1Pay;
+    grand.h2Hours += h2Hours;
+    grand.h2Pay += h2Pay;
+    grand.comm += commMonth;
+    grand.on15 += payOn15;
+    grand.on1 += payOn1;
+    grand.total += monthTotal;
+
+    const h1Sub = (subs || []).some((s) => s.user_id === m.id && s.period === pKeys[0]);
+    const h2Sub = (subs || []).some((s) => s.user_id === m.id && s.period === pKeys[1]);
+    const badge = (ok, label) =>
+      `<span class="sub-badge ${ok ? "ok" : ""}" title="${label}">${ok ? "✓" : "–"}</span>`;
 
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td><button class="member-link" data-view-member="${m.id}" type="button">${m.name || m.email}</button></td>
-      <td class="col-num">${sums.hours}</td>
-      <td class="col-num cell-total">${fmt(sums.total)}</td>
-      <td class="col-num cell-comm">${fmt(sums.comm)}</td>
-      <td class="col-num cell-pay">${fmt(sums.pay)}</td>
-      <td class="col-num"><strong>${fmt(payout)}</strong></td>
-      <td><span class="hint">view sheet →</span></td>
+      <td>${badge(h1Sub, "1st half")} ${badge(h2Sub, "2nd half")}</td>
+      <td class="col-num">${h1Hours}</td>
+      <td class="col-num cell-pay"><strong>${fmt(payOn15)}</strong></td>
+      <td class="col-num">${h2Hours}</td>
+      <td class="col-num cell-pay">${fmt(h2Pay)}</td>
+      <td class="col-num cell-comm">${fmt(commMonth)}</td>
+      <td class="col-num cell-pay"><strong>${fmt(payOn1)}</strong></td>
+      <td class="col-num"><strong>${fmt(monthTotal)}</strong></td>
     `;
     body.appendChild(tr);
   });
@@ -569,17 +794,19 @@ async function renderPayroll() {
   $("payroll-foot").innerHTML = `
     <tr>
       <td>ALL MEMBERS</td>
-      <td class="col-num">${grand.hours}</td>
-      <td class="col-num cell-total">${fmt(grand.total)}</td>
-      <td class="col-num cell-comm">${fmt(grand.comm)}</td>
-      <td class="col-num cell-pay">${fmt(grand.pay)}</td>
-      <td class="col-num"><strong>${fmt(grand.out)}</strong></td>
       <td></td>
+      <td class="col-num">${grand.h1Hours}</td>
+      <td class="col-num cell-pay"><strong>${fmt(grand.on15)}</strong></td>
+      <td class="col-num">${grand.h2Hours}</td>
+      <td class="col-num cell-pay">${fmt(grand.h2Pay)}</td>
+      <td class="col-num cell-comm">${fmt(grand.comm)}</td>
+      <td class="col-num cell-pay"><strong>${fmt(grand.on1)}</strong></td>
+      <td class="col-num"><strong>${fmt(grand.total)}</strong></td>
     </tr>
   `;
 }
 
-// delegated: open a member's full sheet
+// open a member's editable sheet
 $("payroll-body").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-view-member]");
   if (!btn) return;
@@ -587,83 +814,13 @@ $("payroll-body").addEventListener("click", async (e) => {
   const member = membersCache.find((m) => m.id === btn.dataset.viewMember);
   if (!member) return;
 
+  memberSheetTarget = member;
   $("member-sheet-title").textContent =
     (member.name || member.email) + " — " + monthLabel(payMonth);
   $("member-sheet-panel").classList.remove("hidden");
 
-  const rows = await loadMonthRows(member.id, payMonth);
-  const body = $("member-sheet-body");
-  body.innerHTML = "";
-
-  const year = payMonth.getFullYear();
-  const monthIdx = payMonth.getMonth();
-  const total = daysInMonth(payMonth);
-  const sums = { hours: 0, of: 0, fv: 0, slushy: 0, fansly: 0, ofNet: 0, fvNet: 0, slushyNet: 0, fanslyNet: 0, total: 0, comm: 0, pay: 0 };
-
-  for (let day = 1; day <= total; day++) {
-    const date = isoDate(year, monthIdx, day);
-    const row = rows[date];
-    const dateObj = new Date(year, monthIdx, day);
-    const label = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
-
-    const tr = document.createElement("tr");
-    if (dateObj.getDay() === 0 || dateObj.getDay() === 6) tr.classList.add("weekend");
-
-    if (!row) {
-      tr.innerHTML = `<td class="col-date">${label}</td>` + `<td class="col-num">—</td>`.repeat(12);
-      body.appendChild(tr);
-      continue;
-    }
-
-    const calc = calcRow(row, member);
-    sums.hours += num(row.hours);
-    sums.of += num(row.of_gross);
-    sums.fv += num(row.fv_gross);
-    sums.slushy += num(row.slushy_gross);
-    sums.fansly += num(row.fansly_gross);
-    sums.ofNet += calc.ofNet;
-    sums.fvNet += calc.fvNet;
-    sums.slushyNet += calc.slushyNet;
-    sums.fanslyNet += calc.fanslyNet;
-    sums.total += calc.total;
-    sums.comm += calc.commission;
-    sums.pay += calc.hoursPay;
-
-    tr.innerHTML = `
-      <td class="col-date">${label}</td>
-      <td class="col-num">${num(row.hours) || "—"}</td>
-      <td class="col-num">${fmt(row.of_gross)}</td>
-      <td class="col-num net-of">${fmt(calc.ofNet)}</td>
-      <td class="col-num">${fmt(row.fv_gross)}</td>
-      <td class="col-num net-fv">${fmt(calc.fvNet)}</td>
-      <td class="col-num">${fmt(row.slushy_gross)}</td>
-      <td class="col-num net-slushy">${fmt(calc.slushyNet)}</td>
-      <td class="col-num">${fmt(row.fansly_gross)}</td>
-      <td class="col-num net-fansly">${fmt(calc.fanslyNet)}</td>
-      <td class="col-num cell-total">${fmt(calc.total)}</td>
-      <td class="col-num cell-comm">${fmt(calc.commission)}</td>
-      <td class="col-num cell-pay">${fmt(calc.hoursPay)}</td>
-    `;
-    body.appendChild(tr);
-  }
-
-  $("member-sheet-foot").innerHTML = `
-    <tr>
-      <td>TOTAL</td>
-      <td class="col-num">${sums.hours}</td>
-      <td class="col-num">${fmt(sums.of)}</td>
-      <td class="col-num net-of">${fmt(sums.ofNet)}</td>
-      <td class="col-num">${fmt(sums.fv)}</td>
-      <td class="col-num net-fv">${fmt(sums.fvNet)}</td>
-      <td class="col-num">${fmt(sums.slushy)}</td>
-      <td class="col-num net-slushy">${fmt(sums.slushyNet)}</td>
-      <td class="col-num">${fmt(sums.fansly)}</td>
-      <td class="col-num net-fansly">${fmt(sums.fanslyNet)}</td>
-      <td class="col-num cell-total">${fmt(sums.total)}</td>
-      <td class="col-num cell-comm">${fmt(sums.comm)}</td>
-      <td class="col-num cell-pay">${fmt(sums.pay)}</td>
-    </tr>
-  `;
+  await renderUserSheet($("member-sheet-sections"), member, payMonth, "admin");
+  $("member-sheet-panel").scrollIntoView({ behavior: "smooth" });
 });
 
 // ── Boot ────────────────────────────────────────────────────

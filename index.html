@@ -72,7 +72,7 @@
   <!-- ── MY TIMESHEET ── -->
   <main id="view-my-timesheet" class="view">
     <div class="view-head">
-      <h2 id="sheet-title">My Timesheet</h2>
+      <h2>My Timesheet</h2>
       <div class="month-nav">
         <button id="month-prev" class="btn btn-ghost" type="button">‹</button>
         <span id="month-label" class="month-label"></span>
@@ -81,29 +81,7 @@
       <span id="save-status" class="save-status"></span>
     </div>
 
-    <div class="table-scroll">
-      <table class="sheet" id="sheet-table">
-        <thead>
-          <tr>
-            <th class="col-date">Date</th>
-            <th class="col-num th-hours">Hours</th>
-            <th class="col-num th-of">OF Gross $</th>
-            <th class="col-num th-of net">OF Net $</th>
-            <th class="col-num th-fv">FV Gross $</th>
-            <th class="col-num th-fv net">FV Net $</th>
-            <th class="col-num th-slushy">Slushy Gross $</th>
-            <th class="col-num th-slushy net">Slushy Net $</th>
-            <th class="col-num th-fansly">Fansly Gross $</th>
-            <th class="col-num th-fansly net">Fansly Net $</th>
-            <th class="col-num th-total">Total Sales</th>
-            <th class="col-num th-comm">Commission $</th>
-            <th class="col-num th-pay">Hours $</th>
-          </tr>
-        </thead>
-        <tbody id="sheet-body"></tbody>
-        <tfoot id="sheet-foot"></tfoot>
-      </table>
-    </div>
+    <div id="my-sheet-sections" class="sheet-sections"></div>
   </main>
 
   <!-- ── TEAM (admin) ── -->
@@ -155,19 +133,32 @@
       </div>
     </div>
 
+    <div class="pay-explain">
+      <div class="pay-explain-card">
+        <span class="pay-when">Paid on the 15th</span>
+        <span class="pay-what">Hours worked 1st – 14th</span>
+      </div>
+      <div class="pay-explain-card">
+        <span class="pay-when">Paid on the 1st</span>
+        <span class="pay-what">Hours worked 15th – end of month + ALL month's commission</span>
+      </div>
+    </div>
+
     <section class="panel">
       <h3>Monthly summary — all members</h3>
       <div class="table-scroll">
-        <table class="sheet plain">
+        <table class="sheet" style="min-width: 1150px;">
           <thead>
             <tr>
               <th>Member</th>
-              <th class="col-num">Hours</th>
-              <th class="col-num th-total">Total Sales</th>
-              <th class="col-num th-comm">Commission $</th>
-              <th class="col-num th-pay">Hours $</th>
-              <th class="col-num">Total Payout $</th>
-              <th></th>
+              <th>Submitted</th>
+              <th class="col-num th-hours">Hrs 1–14</th>
+              <th class="col-num th-pay">Pay on 15th $</th>
+              <th class="col-num th-hours">Hrs 15–end</th>
+              <th class="col-num th-pay">Hrs $ 15–end</th>
+              <th class="col-num th-comm">Month Commission $</th>
+              <th class="col-num th-pay">Pay on 1st $</th>
+              <th class="col-num">Month Total $</th>
             </tr>
           </thead>
           <tbody id="payroll-body"></tbody>
@@ -178,29 +169,8 @@
 
     <section class="panel hidden" id="member-sheet-panel">
       <h3 id="member-sheet-title"></h3>
-      <div class="table-scroll">
-        <table class="sheet">
-          <thead>
-            <tr>
-              <th class="col-date">Date</th>
-              <th class="col-num th-hours">Hours</th>
-              <th class="col-num th-of">OF Gross $</th>
-              <th class="col-num th-of net">OF Net $</th>
-              <th class="col-num th-fv">FV Gross $</th>
-              <th class="col-num th-fv net">FV Net $</th>
-              <th class="col-num th-slushy">Slushy Gross $</th>
-              <th class="col-num th-slushy net">Slushy Net $</th>
-              <th class="col-num th-fansly">Fansly Gross $</th>
-              <th class="col-num th-fansly net">Fansly Net $</th>
-              <th class="col-num th-total">Total Sales</th>
-              <th class="col-num th-comm">Commission $</th>
-              <th class="col-num th-pay">Hours $</th>
-            </tr>
-          </thead>
-          <tbody id="member-sheet-body"></tbody>
-          <tfoot id="member-sheet-foot"></tfoot>
-        </table>
-      </div>
+      <p class="hint">You're editing as admin — changes save automatically, even on submitted periods.</p>
+      <div id="member-sheet-sections" class="sheet-sections"></div>
     </section>
   </main>
 </div>
