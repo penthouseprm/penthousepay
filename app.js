@@ -722,27 +722,32 @@ async function renderPayroll() {
 
   const { first, last } = monthRange(payMonth);
   const pKeys = [periodKey(payMonth, 1), periodKey(payMonth, 2)];
+  const m2 = String(payMonth.getMonth() + 1).padStart(2, "0");
+  const pay15Key = `${payMonth.getFullYear()}-${m2}-P15`;
+  const pay1Key = `${payMonth.getFullYear()}-${m2}-P1`;
 
   const [
     { data: members, error: memErr },
     { data: sheets, error: shErr },
     { data: subs, error: subErr },
+    { data: pays, error: payErr },
   ] = await Promise.all([
     db.from("profiles").select("*").order("name", { ascending: true }),
     db.from("timesheets").select("*").gte("entry_date", first).lte("entry_date", last),
     db.from("submissions").select("*").in("period", pKeys),
+    db.from("payments").select("*").in("period", [pay15Key, pay1Key]),
   ]);
 
   const body = $("payroll-body");
   body.innerHTML = "";
 
-  if (memErr || shErr || subErr) {
-    body.innerHTML = `<tr><td colspan="9">Failed to load payroll data.</td></tr>`;
+  if (memErr || shErr || subErr || payErr) {
+    body.innerHTML = `<tr><td colspan="8">Failed to load payroll data.</td></tr>`;
     return;
   }
   membersCache = members || [];
 
-  const grand = { h1Hours: 0, h1Pay: 0, h2Hours: 0, h2Pay: 0, comm: 0, on15: 0, on1: 0, total: 0 };
+  const grand = { h1Hours: 0, h2Hours: 0, comm: 0, on15: 0, on1: 0, total: 0 };
 
   membersCache.forEach((m) => {
     const rows = (sheets || []).filter((s) => s.user_id === m.id);
@@ -763,9 +768,7 @@ async function renderPayroll() {
     const monthTotal = payOn15 + payOn1;
 
     grand.h1Hours += h1Hours;
-    grand.h1Pay += h1Pay;
     grand.h2Hours += h2Hours;
-    grand.h2Pay += h2Pay;
     grand.comm += commMonth;
     grand.on15 += payOn15;
     grand.on1 += payOn1;
@@ -776,16 +779,28 @@ async function renderPayroll() {
     const badge = (ok, label) =>
       `<span class="sub-badge ${ok ? "ok" : ""}" title="${label}">${ok ? "✓" : "–"}</span>`;
 
+    const paid15 = (pays || []).some((p) => p.user_id === m.id && p.period === pay15Key);
+    const paid1 = (pays || []).some((p) => p.user_id === m.id && p.period === pay1Key);
+
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td><button class="member-link" data-view-member="${m.id}" type="button">${m.name || m.email}</button></td>
       <td>${badge(h1Sub, "1st half")} ${badge(h2Sub, "2nd half")}</td>
       <td class="col-num">${h1Hours}</td>
-      <td class="col-num cell-pay"><strong>${fmt(payOn15)}</strong></td>
       <td class="col-num">${h2Hours}</td>
-      <td class="col-num cell-pay">${fmt(h2Pay)}</td>
       <td class="col-num cell-comm">${fmt(commMonth)}</td>
-      <td class="col-num cell-pay"><strong>${fmt(payOn1)}</strong></td>
+      <td class="col-num cell-pay15">
+        <label class="paid-wrap" title="Mark paid">
+          <strong>${fmt(payOn15)}</strong>
+          <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay15Key}" ${paid15 ? "checked" : ""}>
+        </label>
+      </td>
+      <td class="col-num cell-pay">
+        <label class="paid-wrap" title="Mark paid">
+          <strong>${fmt(payOn1)}</strong>
+          <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay1Key}" ${paid1 ? "checked" : ""}>
+        </label>
+      </td>
       <td class="col-num"><strong>${fmt(monthTotal)}</strong></td>
     `;
     body.appendChild(tr);
@@ -796,20 +811,53 @@ async function renderPayroll() {
       <td>ALL MEMBERS</td>
       <td></td>
       <td class="col-num">${grand.h1Hours}</td>
-      <td class="col-num cell-pay"><strong>${fmt(grand.on15)}</strong></td>
       <td class="col-num">${grand.h2Hours}</td>
-      <td class="col-num cell-pay">${fmt(grand.h2Pay)}</td>
       <td class="col-num cell-comm">${fmt(grand.comm)}</td>
+      <td class="col-num cell-pay15"><strong>${fmt(grand.on15)}</strong></td>
       <td class="col-num cell-pay"><strong>${fmt(grand.on1)}</strong></td>
       <td class="col-num"><strong>${fmt(grand.total)}</strong></td>
     </tr>
   `;
 }
 
-// open a member's editable sheet
+// toggle paid checkboxes
+$("payroll-body").addEventListener("change", async (e) => {
+  const check = e.target;
+  if (!check.classList.contains("paid-check")) return;
+
+  const userId = check.dataset.payUser;
+  const period = check.dataset.payPeriod;
+
+  if (check.checked) {
+    const { error } = await db.from("payments").insert({ user_id: userId, period });
+    if (error && error.code !== "23505") {
+      check.checked = false;
+      toast("Could not mark as paid: " + error.message, true);
+      return;
+    }
+    toast("Marked as paid ✓");
+  } else {
+    const { error } = await db.from("payments").delete().eq("user_id", userId).eq("period", period);
+    if (error) {
+      check.checked = true;
+      toast("Could not unmark: " + error.message, true);
+      return;
+    }
+    toast("Unmarked");
+  }
+});
+
+// open a member's editable sheet (click again to minimize)
 $("payroll-body").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-view-member]");
   if (!btn) return;
+
+  // clicking the same member again closes the panel
+  if (memberSheetTarget && memberSheetTarget.id === btn.dataset.viewMember) {
+    $("member-sheet-panel").classList.add("hidden");
+    memberSheetTarget = null;
+    return;
+  }
 
   const member = membersCache.find((m) => m.id === btn.dataset.viewMember);
   if (!member) return;

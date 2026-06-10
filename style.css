@@ -443,3 +443,42 @@ td.cell-pay { color: var(--c-pay); }
   color: var(--text-dim);
 }
 .sub-badge.ok { background: rgba(88,201,136,0.14); color: var(--c-fv); }
+
+/* ════════════ UPDATE 2: paid checkboxes & yellow 15th ════════════ */
+.th-pay15 { color: var(--accent) !important; }
+td.cell-pay15 { color: var(--accent); }
+
+.paid-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.paid-check {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 17px; height: 17px;
+  border: 1.5px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.12s, border-color 0.12s;
+}
+.paid-check:hover { border-color: var(--text-dim); }
+.paid-check:checked {
+  background: var(--c-fv);
+  border-color: var(--c-fv);
+}
+.paid-check:checked::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  color: #0E1014;
+}
