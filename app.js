@@ -747,16 +747,17 @@ async function renderPayroll() {
   }
   membersCache = members || [];
 
-  const grand = { h1Hours: 0, h2Hours: 0, comm: 0, on15: 0, on1: 0, total: 0 };
+  const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, on15: 0, on1: 0, total: 0 };
 
   membersCache.forEach((m) => {
     const rows = (sheets || []).filter((s) => s.user_id === m.id);
-    let h1Hours = 0, h2Hours = 0, commMonth = 0;
+    let h1Hours = 0, h2Hours = 0, commMonth = 0, netMonth = 0;
 
     rows.forEach((r) => {
       const day = parseInt(r.entry_date.slice(8), 10);
       const calc = calcRow(r, m);
       commMonth += calc.commission;
+      netMonth += calc.total;
       if (day <= 14) { h1Hours += num(r.hours); }
       else { h2Hours += num(r.hours); }
     });
@@ -770,6 +771,7 @@ async function renderPayroll() {
     grand.h1Hours += h1Hours;
     grand.h2Hours += h2Hours;
     grand.comm += commMonth;
+    grand.net += netMonth;
     grand.on15 += payOn15;
     grand.on1 += payOn1;
     grand.total += monthTotal;
@@ -788,14 +790,15 @@ async function renderPayroll() {
       <td>${badge(h1Sub, "1st half")} ${badge(h2Sub, "2nd half")}</td>
       <td class="col-num">${h1Hours}</td>
       <td class="col-num">${h2Hours}</td>
-      <td class="col-num cell-comm">${fmt(commMonth)}</td>
-      <td class="col-num cell-pay15">
+      <td class="col-num cell-total">${fmt(netMonth)}</td>
+      <td class="col-num cell-grey">${fmt(commMonth)}</td>
+      <td class="col-num cell-payout${paid15 ? " paid" : ""}">
         <label class="paid-wrap" title="Mark paid">
           <strong>${fmt(payOn15)}</strong>
           <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay15Key}" ${paid15 ? "checked" : ""}>
         </label>
       </td>
-      <td class="col-num cell-pay">
+      <td class="col-num cell-payout${paid1 ? " paid" : ""}">
         <label class="paid-wrap" title="Mark paid">
           <strong>${fmt(payOn1)}</strong>
           <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay1Key}" ${paid1 ? "checked" : ""}>
@@ -812,9 +815,10 @@ async function renderPayroll() {
       <td></td>
       <td class="col-num">${grand.h1Hours}</td>
       <td class="col-num">${grand.h2Hours}</td>
-      <td class="col-num cell-comm">${fmt(grand.comm)}</td>
-      <td class="col-num cell-pay15"><strong>${fmt(grand.on15)}</strong></td>
-      <td class="col-num cell-pay"><strong>${fmt(grand.on1)}</strong></td>
+      <td class="col-num cell-total">${fmt(grand.net)}</td>
+      <td class="col-num cell-grey">${fmt(grand.comm)}</td>
+      <td class="col-num cell-payout"><strong>${fmt(grand.on15)}</strong></td>
+      <td class="col-num cell-payout"><strong>${fmt(grand.on1)}</strong></td>
       <td class="col-num"><strong>${fmt(grand.total)}</strong></td>
     </tr>
   `;
@@ -827,6 +831,7 @@ $("payroll-body").addEventListener("change", async (e) => {
 
   const userId = check.dataset.payUser;
   const period = check.dataset.payPeriod;
+  const cell = check.closest("td");
 
   if (check.checked) {
     const { error } = await db.from("payments").insert({ user_id: userId, period });
@@ -835,6 +840,7 @@ $("payroll-body").addEventListener("change", async (e) => {
       toast("Could not mark as paid: " + error.message, true);
       return;
     }
+    if (cell) cell.classList.add("paid");
     toast("Marked as paid ✓");
   } else {
     const { error } = await db.from("payments").delete().eq("user_id", userId).eq("period", period);
@@ -843,6 +849,7 @@ $("payroll-body").addEventListener("change", async (e) => {
       toast("Could not unmark: " + error.message, true);
       return;
     }
+    if (cell) cell.classList.remove("paid");
     toast("Unmarked");
   }
 });

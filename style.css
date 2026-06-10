@@ -482,3 +482,11 @@ td.cell-pay15 { color: var(--accent); }
   font-weight: 800;
   color: #0E1014;
 }
+
+/* ════════════ UPDATE 3: grey commission, payout colors ════════════ */
+.th-grey { color: var(--text-dim) !important; }
+td.cell-grey { color: var(--text-dim); }
+
+.th-payout { color: var(--accent) !important; }
+td.cell-payout { color: var(--accent); }
+td.cell-payout.paid { color: var(--c-fv); }
