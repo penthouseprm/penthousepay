@@ -1,9 +1,8 @@
 // ============================================================
-// CONFIG — paste your Supabase project credentials here
-// Supabase Dashboard → Project Settings → API
+// CONFIG — Supabase project credentials
 // ============================================================
-const SUPABASE_URL = "YOUR_SUPABASE_URL";        // e.g. https://abcdefgh.supabase.co
-const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+const SUPABASE_URL = "https://trtadlggiueszoccuqyz.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_s7TA4DlXCHaiXoJE5O4fww_HHiiG57R";
 
 // Platform net rates (net = gross × rate)
 const NET_RATES = {
