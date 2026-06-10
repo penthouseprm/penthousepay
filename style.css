@@ -606,3 +606,47 @@ td.cell-payout.paid { color: var(--c-fv); }
 .ts-status.hit { background: rgba(88,201,136,0.14); color: var(--c-fv); }
 .ts-status.miss { background: rgba(240,122,122,0.14); color: var(--c-total); }
 .ts-status.future { color: var(--text-dim); }
+
+/* ════════════ UPDATE 6: collapsible team cards ════════════ */
+.team-card { padding: 0; overflow: hidden; }
+.team-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 16px 18px;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-body);
+  color: var(--text);
+  transition: background 0.12s;
+}
+.team-row:hover { background: var(--bg-row); }
+.team-row-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+}
+.team-row-meta { font-size: 12.5px; color: var(--text-dim); }
+.team-row-summary {
+  margin-left: auto;
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+}
+.team-chevron {
+  color: var(--text-dim);
+  font-size: 14px;
+  transition: transform 0.15s;
+  transform: rotate(-90deg);
+}
+.team-chevron.open { transform: rotate(0deg); }
+.team-detail { padding: 4px 18px 18px; border-top: 1px solid var(--border); }
+.team-detail .team-head { margin-top: 14px; }
+
+@media (max-width: 720px) {
+  .team-row { flex-wrap: wrap; gap: 8px; }
+  .team-row-summary { margin-left: 0; }
+}

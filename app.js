@@ -745,19 +745,53 @@ $("ts-month-next").addEventListener("click", () => {
   renderTeamSales();
 });
 
+// remembers which team cards are expanded between re-renders
+let expandedTeams = new Set();
+
 $("btn-create-team").addEventListener("click", async () => {
   const name = $("new-team-name").value.trim();
   const target = num($("new-team-target").value);
   if (!name) { toast("Enter a team name.", true); return; }
 
-  const { error } = await db.from("teams").insert({ name, daily_target: target });
-  if (error) { toast("Could not create team: " + error.message, true); return; }
+  const selectedIds = Array.from(
+    $("new-team-chips").querySelectorAll(".chip-check:checked")
+  ).map((c) => c.dataset.chipUser);
+
+  if (!selectedIds.length) { toast("Select at least one chatter for the team.", true); return; }
+
+  const { data: created, error } = await db
+    .from("teams")
+    .insert({ name, daily_target: target })
+    .select()
+    .single();
+  if (error || !created) { toast("Could not create team: " + (error ? error.message : "unknown error"), true); return; }
+
+  const memberRows = selectedIds.map((uid) => ({ team_id: created.id, user_id: uid }));
+  const { error: tmError } = await db.from("team_members").insert(memberRows);
+  if (tmError) { toast("Team created but adding members failed: " + tmError.message, true); }
 
   $("new-team-name").value = "";
   $("new-team-target").value = "";
+  expandedTeams.add(created.id);
   toast("Team created ✓");
   renderTeamSales();
 });
+
+// visual state for the create-form chips
+$("new-team-chips").addEventListener("change", (e) => {
+  const check = e.target;
+  if (!check.classList.contains("chip-check")) return;
+  check.closest(".member-chip").classList.toggle("in-team", check.checked);
+});
+
+function memberChipHtml(m, inTeam) {
+  return `
+    <label class="member-chip${inTeam ? " in-team" : ""}">
+      <input type="checkbox" class="chip-check" data-chip-user="${m.id}" ${inTeam ? "checked" : ""}>
+      ${m.name || m.email}
+    </label>
+  `;
+}
 
 async function renderTeamSales() {
   $("ts-month-label").textContent = monthLabel(teamMonth);
@@ -785,58 +819,27 @@ async function renderTeamSales() {
   }
   membersCache = members || [];
 
+  // populate the create-form chips (all unchecked)
+  $("new-team-chips").innerHTML = membersCache.map((m) => memberChipHtml(m, false)).join("");
+
   if (!teams || !teams.length) {
     container.innerHTML = `<p class="hint">No teams yet — create your first one above.</p>`;
     return;
   }
 
-  const todayIso = isoDate(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+  const now = new Date();
+  const todayIso = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
+  const year = teamMonth.getFullYear();
+  const monthIdx = teamMonth.getMonth();
+  const lastDay = daysInMonth(teamMonth);
 
   teams.forEach((team) => {
     const memberIds = (teamMembers || [])
       .filter((tm) => tm.team_id === team.id)
       .map((tm) => tm.user_id);
 
-    const section = document.createElement("section");
-    section.className = "panel";
-    section.dataset.teamId = team.id;
-
-    // header: name + target editors + delete
-    const head = document.createElement("div");
-    head.className = "team-head";
-    head.innerHTML = `
-      <input class="team-name-input" data-tfield="name" value="${team.name}" title="Team name">
-      <label class="team-target-label">Daily target $
-        <input class="cell rate" data-tfield="daily_target" type="number" min="0" step="0.01" value="${team.daily_target}">
-      </label>
-      <span class="spacer"></span>
-      <button class="btn btn-danger btn-small" data-del-team type="button">Delete team</button>
-    `;
-    section.appendChild(head);
-
-    // member chips
-    const chips = document.createElement("div");
-    chips.className = "member-chips";
-    membersCache.forEach((m) => {
-      const inTeam = memberIds.includes(m.id);
-      const chip = document.createElement("label");
-      chip.className = "member-chip" + (inTeam ? " in-team" : "");
-      chip.innerHTML = `
-        <input type="checkbox" class="chip-check" data-chip-user="${m.id}" ${inTeam ? "checked" : ""}>
-        ${m.name || m.email}
-      `;
-      chips.appendChild(chip);
-    });
-    section.appendChild(chips);
-
-    // daily tally table
-    const year = teamMonth.getFullYear();
-    const monthIdx = teamMonth.getMonth();
-    const lastDay = daysInMonth(teamMonth);
+    // tally every day (needed for the summary even when collapsed)
     let hits = 0, misses = 0;
-
-    const scroll = document.createElement("div");
-    scroll.className = "table-scroll";
     const rowsHtml = [];
 
     for (let day = 1; day <= lastDay; day++) {
@@ -855,10 +858,9 @@ async function renderTeamSales() {
 
       let statusHtml = `<span class="ts-status future">—</span>`;
       if (!isFuture) {
-        const hit = dayNet >= num(team.daily_target) && num(team.daily_target) > 0;
         if (num(team.daily_target) === 0) {
           statusHtml = `<span class="ts-status future">No target</span>`;
-        } else if (hit) {
+        } else if (dayNet >= num(team.daily_target)) {
           statusHtml = `<span class="ts-status hit">HIT ✓</span>`;
           hits++;
         } else {
@@ -877,25 +879,52 @@ async function renderTeamSales() {
       `);
     }
 
-    const summary = document.createElement("p");
-    summary.className = "team-summary";
-    summary.innerHTML = `This month: <strong class="ts-hit-count">${hits} hit${hits === 1 ? "" : "s"}</strong> · <strong class="ts-miss-count">${misses} miss${misses === 1 ? "" : "es"}</strong>`;
-    section.appendChild(summary);
+    const isExpanded = expandedTeams.has(team.id);
 
-    scroll.innerHTML = `
-      <table class="sheet plain" style="min-width: 560px;">
-        <thead>
-          <tr>
-            <th class="col-date">Date</th>
-            <th class="col-num th-total">Team Net Sales $</th>
-            <th class="col-num th-grey">Target $</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>${rowsHtml.join("")}</tbody>
-      </table>
+    const section = document.createElement("section");
+    section.className = "panel team-card";
+    section.dataset.teamId = team.id;
+
+    section.innerHTML = `
+      <button class="team-row" data-toggle-team type="button">
+        <span class="team-row-name">${team.name}</span>
+        <span class="team-row-meta">${memberIds.length} chatter${memberIds.length === 1 ? "" : "s"} · target ${fmt(team.daily_target)}/day</span>
+        <span class="team-row-summary">
+          <strong class="ts-hit-count">${hits} hit${hits === 1 ? "" : "s"}</strong>
+          <strong class="ts-miss-count">${misses} miss${misses === 1 ? "" : "es"}</strong>
+        </span>
+        <span class="team-chevron${isExpanded ? " open" : ""}">▾</span>
+      </button>
+
+      <div class="team-detail${isExpanded ? "" : " hidden"}">
+        <div class="team-head">
+          <input class="team-name-input" data-tfield="name" value="${team.name}" title="Team name">
+          <label class="team-target-label">Daily target $
+            <input class="cell rate" data-tfield="daily_target" type="number" min="0" step="0.01" value="${team.daily_target}">
+          </label>
+          <span class="spacer"></span>
+          <button class="btn btn-danger btn-small" data-del-team type="button">Delete team</button>
+        </div>
+
+        <div class="member-chips">
+          ${membersCache.map((m) => memberChipHtml(m, memberIds.includes(m.id))).join("")}
+        </div>
+
+        <div class="table-scroll">
+          <table class="sheet plain" style="min-width: 560px;">
+            <thead>
+              <tr>
+                <th class="col-date">Date</th>
+                <th class="col-num th-total">Team Net Sales $</th>
+                <th class="col-num th-grey">Target $</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml.join("")}</tbody>
+          </table>
+        </div>
+      </div>
     `;
-    section.appendChild(scroll);
 
     container.appendChild(section);
   });
@@ -949,6 +978,22 @@ $("teams-container").addEventListener("change", async (e) => {
 });
 
 $("teams-container").addEventListener("click", async (e) => {
+  // expand / collapse
+  const toggleBtn = e.target.closest("[data-toggle-team]");
+  if (toggleBtn) {
+    const card = toggleBtn.closest("[data-team-id]");
+    const teamId = card.dataset.teamId;
+    const detail = card.querySelector(".team-detail");
+    const chevron = card.querySelector(".team-chevron");
+    const nowOpen = detail.classList.contains("hidden");
+    detail.classList.toggle("hidden", !nowOpen);
+    chevron.classList.toggle("open", nowOpen);
+    if (nowOpen) expandedTeams.add(teamId);
+    else expandedTeams.delete(teamId);
+    return;
+  }
+
+  // delete team
   const btn = e.target.closest("[data-del-team]");
   if (!btn) return;
 
@@ -957,6 +1002,7 @@ $("teams-container").addEventListener("click", async (e) => {
 
   const { error } = await db.from("teams").delete().eq("id", section.dataset.teamId);
   if (error) { toast("Could not delete team: " + error.message, true); return; }
+  expandedTeams.delete(section.dataset.teamId);
   toast("Team deleted");
   renderTeamSales();
 });
