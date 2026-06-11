@@ -722,3 +722,43 @@ td.cell-payout.paid { color: var(--c-fv); }
 /* ════════════ UPDATE 11: super admin ════════════ */
 .role-pill.super_admin { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); }
 #preview-role { max-width: 180px; }
+
+/* ════════════ UPDATE 13: bonus celebration banners ════════════ */
+#bonus-banners {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 0 22px;
+}
+#bonus-banners:not(:empty) { padding-top: 14px; }
+
+.bonus-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(90deg, rgba(224,182,84,0.16), rgba(88,201,136,0.10));
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 12px 16px;
+  animation: banner-in 0.35s ease;
+}
+@keyframes banner-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.bonus-banner-icon { font-size: 20px; }
+.bonus-banner-text { font-size: 13.5px; }
+.bonus-banner-text strong { color: var(--accent); }
+.bonus-banner-x {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.bonus-banner-x:hover { color: var(--text); background: var(--bg-row); }

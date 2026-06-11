@@ -239,8 +239,60 @@ async function init() {
   $("auth-view").classList.add("hidden");
   $("app-view").classList.remove("hidden");
 
+  loadBonusBanners();
   renderMySheet();
 }
+
+// ── bonus celebration banners ──
+const BONUS_LABELS = {
+  full_script: "Full Script",
+  rebuttal: "Rebuttal",
+  team: "Team",
+  individual: "Individual",
+  extras: "Extras",
+};
+
+async function loadBonusBanners() {
+  // only chatters receive bonuses
+  if (currentProfile.role !== "member") return;
+
+  const { data: events, error } = await db
+    .from("bonus_events")
+    .select("*")
+    .eq("user_id", currentUser.id)
+    .eq("dismissed", false)
+    .order("created_at", { ascending: true });
+
+  if (error || !events || !events.length) return;
+
+  const container = $("bonus-banners");
+  container.innerHTML = "";
+
+  events.forEach((ev) => {
+    const banner = document.createElement("div");
+    banner.className = "bonus-banner";
+    banner.innerHTML = `
+      <span class="bonus-banner-icon">🎉</span>
+      <span class="bonus-banner-text">Congratulations! <strong>${fmt(ev.amount)}</strong> bonus received for <strong>${ev.label}</strong>!</span>
+      <button class="bonus-banner-x" data-dismiss-bonus="${ev.id}" type="button" title="Dismiss">✕</button>
+    `;
+    container.appendChild(banner);
+  });
+}
+
+$("bonus-banners").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-dismiss-bonus]");
+  if (!btn) return;
+
+  const banner = btn.closest(".bonus-banner");
+  const { error } = await db
+    .from("bonus_events")
+    .update({ dismissed: true })
+    .eq("id", btn.dataset.dismissBonus);
+
+  if (error) { toast("Could not dismiss: " + error.message, true); return; }
+  banner.remove();
+});
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -1242,6 +1294,13 @@ async function renderBonuses() {
 
     const tr = document.createElement("tr");
     tr.dataset.bonusUser = m.id;
+    tr.dataset.prevBonus = JSON.stringify({
+      full_script: num(b.full_script),
+      rebuttal: num(b.rebuttal),
+      team: num(b.team),
+      individual: num(b.individual),
+      extras: num(b.extras),
+    });
     tr.innerHTML = `
       <td>${m.name || m.email}</td>
       <td class="col-num"><input class="cell bonus-cell" data-bfield="full_script" type="number" min="0" step="1" value="${b.full_script || ""}" placeholder="–"></td>
@@ -1399,6 +1458,31 @@ $("bonuses-body").addEventListener("input", (e) => {
       return;
     }
     setBonusSaveStatus("saved", "All changes saved");
+
+    // record increases as celebration events for the chatter
+    const prev = JSON.parse(tr.dataset.prevBonus || "{}");
+    const events = [];
+    ["full_script", "rebuttal", "team", "individual"].forEach((field) => {
+      const diff = num(b[field]) - num(prev[field]);
+      if (diff > 0) {
+        events.push({
+          user_id: bonusUserId,
+          amount: diff * BONUS_RATES[field],
+          label: BONUS_LABELS[field],
+        });
+      }
+    });
+    const extrasDiff = num(b.extras) - num(prev.extras);
+    if (extrasDiff > 0) {
+      events.push({ user_id: bonusUserId, amount: extrasDiff, label: BONUS_LABELS.extras });
+    }
+
+    tr.dataset.prevBonus = JSON.stringify(b);
+
+    if (events.length) {
+      const { error: evError } = await db.from("bonus_events").insert(events);
+      if (evError) console.error("Could not record bonus events:", evError.message);
+    }
   }, 700);
 });
 
