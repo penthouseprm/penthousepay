@@ -71,7 +71,9 @@ function roleLabel(role) {
 }
 
 function isNonChatter(profile) {
-  return profile.role === "non_chatter";
+  // admins are classified as non-chatters: hourly-only timesheets,
+  // no sales/commission, no bonuses, not eligible for sales teams
+  return profile.role === "non_chatter" || profile.role === "admin";
 }
 
 function toast(msg, isError = false) {
