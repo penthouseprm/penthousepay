@@ -780,6 +780,7 @@ async function renderTeam() {
   const { data: invites, error: invErr } = await db
     .from("invites")
     .select("*")
+    .eq("used", false)
     .order("created_at", { ascending: false });
 
   const list = $("invites-list");
@@ -792,10 +793,10 @@ async function renderTeam() {
       item.className = "invite-item";
       item.innerHTML = `
         <span>${inv.email}</span>
-        <span class="pill">${inv.role}</span>
-        <span class="pill" style="background:${inv.used ? "rgba(88,201,136,0.12)" : "rgba(138,146,166,0.12)"};color:${inv.used ? "var(--c-fv)" : "var(--text-dim)"}">${inv.used ? "Used" : "Pending"}</span>
+        <span class="pill">${roleLabel(inv.role)}</span>
+        <span class="pill" style="background:rgba(138,146,166,0.12);color:var(--text-dim)">Pending</span>
         <span class="spacer"></span>
-        ${inv.used ? "" : `<button class="btn btn-danger btn-small" data-del-invite="${inv.id}" type="button">Revoke</button>`}
+        <button class="btn btn-danger btn-small" data-del-invite="${inv.id}" type="button">Revoke</button>
       `;
       list.appendChild(item);
     });
