@@ -209,6 +209,14 @@ async function init() {
     return;
   }
 
+  if (profile.active === false) {
+    showAuthError("This account has been deactivated. Contact an admin if you think this is a mistake.");
+    await db.auth.signOut();
+    $("auth-view").classList.remove("hidden");
+    $("app-view").classList.add("hidden");
+    return;
+  }
+
   currentProfile = profile;
   $("user-name").textContent = profile.name || profile.email;
 
@@ -726,19 +734,87 @@ async function renderTeam() {
 
   membersCache.forEach((m) => {
     const tr = document.createElement("tr");
+    tr.dataset.memberRow = m.id;
     const commCell = isNonChatter(m)
       ? `<td class="col-num"><span class="hint">—</span></td><td><span class="hint">hourly only</span></td>`
       : `<td class="col-num"><input class="cell rate" data-member="${m.id}" data-rate-field="commission_rate" type="number" min="0" step="0.001" value="${m.commission_rate}"></td><td><span class="hint">commission as decimal — 0.03 = 3%</span></td>`;
+
+    const isSelf = m.id === currentUser.id;
+    const isDeactivated = m.active === false;
+    const firedBadge = m.fired ? ` <span class="fired-badge">FIRED</span>` : "";
+    const deactivatedBadge = isDeactivated ? ` <span class="deactivated-badge">DEACTIVATED</span>` : "";
+    let actionsCell;
+    if (isSelf) {
+      actionsCell = `<td><span class="hint">you</span></td>`;
+    } else if (isDeactivated) {
+      actionsCell = `<td class="actions-cell">
+        <button class="btn btn-danger btn-small" data-remove-member="${m.id}" type="button">Remove</button>
+      </td>`;
+    } else {
+      actionsCell = `<td class="actions-cell">
+        ${m.fired
+          ? `<button class="btn btn-ghost btn-small" data-unfire-member="${m.id}" type="button">Unfire</button>`
+          : `<button class="btn btn-danger btn-small" data-fire-member="${m.id}" type="button">Fired</button>`}
+        <button class="btn btn-danger btn-small" data-remove-member="${m.id}" type="button">Remove</button>
+      </td>`;
+    }
+
     tr.innerHTML = `
-      <td>${m.name || "—"}</td>
+      <td>${m.name || "—"}${firedBadge}${deactivatedBadge}</td>
       <td>${m.email}</td>
       <td><span class="role-pill ${m.role}">${roleLabel(m.role)}</span></td>
       <td class="col-num"><input class="cell rate" data-member="${m.id}" data-rate-field="hourly_rate" type="number" min="0" step="0.25" value="${m.hourly_rate}"></td>
       ${commCell}
+      ${actionsCell}
     `;
     body.appendChild(tr);
   });
 }
+
+// fire / unfire / remove members
+$("members-body").addEventListener("click", async (e) => {
+  const fireBtn = e.target.closest("[data-fire-member]");
+  if (fireBtn) {
+    const m = membersCache.find((x) => x.id === fireBtn.dataset.fireMember);
+    if (!m) return;
+    if (!confirm(`Mark ${m.name || m.email} as fired?\n\nTheir FULL remaining pay (including all commission and bonuses) will be due on the next payday. The day after that payday their login will be deactivated automatically — their data and pay history are kept.`)) return;
+
+    const { error } = await db.from("profiles")
+      .update({ fired: true, fired_at: new Date().toISOString() })
+      .eq("id", m.id);
+    if (error) { toast("Could not mark as fired: " + error.message, true); return; }
+    toast(`${m.name || m.email} marked as fired`);
+    renderTeam();
+    return;
+  }
+
+  const unfireBtn = e.target.closest("[data-unfire-member]");
+  if (unfireBtn) {
+    const m = membersCache.find((x) => x.id === unfireBtn.dataset.unfireMember);
+    if (!m) return;
+
+    const { error } = await db.from("profiles")
+      .update({ fired: false, fired_at: null })
+      .eq("id", m.id);
+    if (error) { toast("Could not unfire: " + error.message, true); return; }
+    toast(`${m.name || m.email} is no longer marked as fired`);
+    renderTeam();
+    return;
+  }
+
+  const removeBtn = e.target.closest("[data-remove-member]");
+  if (removeBtn) {
+    const m = membersCache.find((x) => x.id === removeBtn.dataset.removeMember);
+    if (!m) return;
+    if (!confirm(`PERMANENTLY remove ${m.name || m.email} from the platform?\n\nThis deletes their account, login access, and ALL their data (timesheets, bonuses, fines, payment records). This cannot be undone.`)) return;
+    if (!confirm(`Are you absolutely sure? ${m.name || m.email}'s entire history will be gone.`)) return;
+
+    const { error } = await db.from("profiles").delete().eq("id", m.id);
+    if (error) { toast("Could not remove member: " + error.message, true); return; }
+    toast(`${m.name || m.email} removed from the platform`);
+    renderTeam();
+  }
+});
 
 $("btn-invite").addEventListener("click", async () => {
   const email = $("invite-email").value.trim().toLowerCase();
@@ -1360,8 +1436,14 @@ async function renderPayroll() {
 
     // ── NON-CHATTERS: hourly only ──
     if (isNonChatter(m)) {
-      const payOn15 = h1Pay;
-      const payOn1 = h2Pay;
+      let payOn15 = h1Pay;
+      let payOn1 = h2Pay;
+
+      // fired: full remaining pay lands on the next unpaid payday
+      if (m.fired && !paid15) {
+        payOn15 = h1Pay + h2Pay;
+        payOn1 = 0;
+      }
       const monthTotal = payOn15 + payOn1;
 
       ncGrand.h1Hours += h1Hours;
@@ -1370,9 +1452,11 @@ async function renderPayroll() {
       ncGrand.on1 += payOn1;
       ncGrand.total += monthTotal;
 
+      const firedBadge = m.fired ? ` <span class="fired-badge" title="Fired — full pay due next payday">FIRED</span>` : "";
+
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td><button class="member-link" data-view-member="${m.id}" type="button">${m.name || m.email}</button></td>
+        <td><button class="member-link" data-view-member="${m.id}" type="button">${m.name || m.email}</button>${firedBadge}</td>
         <td>${badge(h1Sub, "1st half")} ${badge(h2Sub, "2nd half")}</td>
         <td class="col-num">${h1Hours}</td>
         <td class="col-num">${h2Hours}</td>
@@ -1401,8 +1485,14 @@ async function renderPayroll() {
       .filter((f) => f.user_id === m.id)
       .reduce((sum, f) => sum + num(f.amount), 0);
 
-    const payOn15 = h1Pay;                                          // 15th: hours 1–14 only
-    const payOn1 = h2Pay + commMonth + bonusTotal - fineTotal;      // 1st: hours 15–end + commission + bonuses − fines
+    let payOn15 = h1Pay;                                          // 15th: hours 1–14 only
+    let payOn1 = h2Pay + commMonth + bonusTotal - fineTotal;      // 1st: hours 15–end + commission + bonuses − fines
+
+    // fired: full remaining pay (incl. commission & bonuses) lands on the next unpaid payday
+    if (m.fired && !paid15) {
+      payOn15 = h1Pay + h2Pay + commMonth + bonusTotal - fineTotal;
+      payOn1 = 0;
+    }
     const monthTotal = payOn15 + payOn1;
 
     grand.h1Hours += h1Hours;
@@ -1417,7 +1507,7 @@ async function renderPayroll() {
 
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td><button class="member-link" data-view-member="${m.id}" type="button">${m.name || m.email}</button></td>
+      <td><button class="member-link" data-view-member="${m.id}" type="button">${m.name || m.email}</button>${m.fired ? ` <span class="fired-badge" title="Fired — full pay (incl. commission) due next payday">FIRED</span>` : ""}</td>
       <td>${badge(h1Sub, "1st half")} ${badge(h2Sub, "2nd half")}</td>
       <td class="col-num">${h1Hours}</td>
       <td class="col-num">${h2Hours}</td>
