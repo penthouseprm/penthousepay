@@ -67,13 +67,23 @@ function num(v) {
 function roleLabel(role) {
   if (role === "member") return "Chatter";
   if (role === "non_chatter") return "Non-Chatter";
+  if (role === "super_admin") return "Super Admin";
   return "Admin";
+}
+
+function isAdminUser(profile) {
+  return profile.role === "admin" || profile.role === "super_admin";
+}
+
+function isSuperAdmin(profile) {
+  return profile.role === "super_admin";
 }
 
 function isNonChatter(profile) {
   // admins are classified as non-chatters: hourly-only timesheets,
-  // no sales/commission, no bonuses, not eligible for sales teams
-  return profile.role === "non_chatter" || profile.role === "admin";
+  // no sales/commission, no bonuses, not eligible for sales teams.
+  // super admins are excluded from everything (not an employee).
+  return profile.role === "non_chatter" || profile.role === "admin" || profile.role === "super_admin";
 }
 
 function toast(msg, isError = false) {
@@ -222,7 +232,7 @@ async function init() {
   currentProfile = profile;
   $("user-name").textContent = profile.name || profile.email;
 
-  if (profile.role === "admin") {
+  if (isAdminUser(profile)) {
     document.querySelectorAll(".admin-only").forEach((el) => el.classList.remove("hidden"));
   }
 
@@ -328,9 +338,9 @@ async function renderUserSheet(container, profile, monthDate, mode) {
   [1, 2].forEach((half) => {
     const pKey = periodKey(monthDate, half);
     const submittedAt = subs[pKey] || null;
-    const isAdmin = currentProfile.role === "admin";
-    // members can't edit a submitted period; admins always can
-    const editable = isAdmin || !submittedAt;
+    const isAdmin = isAdminUser(currentProfile);
+    // preview mode: always read-only; members can't edit a submitted period; admins always can
+    const editable = mode === "preview" ? false : (isAdmin || !submittedAt);
 
     const firstDay = half === 1 ? 1 : 15;
     const endDay = half === 1 ? 14 : lastDay;
@@ -413,7 +423,9 @@ async function renderUserSheet(container, profile, monthDate, mode) {
     const bar = document.createElement("div");
     bar.className = "submit-bar";
 
-    if (mode === "self") {
+    if (mode === "preview") {
+      bar.innerHTML = `<span class="hint">Preview only — this is what a ${profile.role === "member" ? "Chatter" : "Non-Chatter"} timesheet looks like. Inputs are disabled.</span>`;
+    } else if (mode === "self") {
       if (submittedAt) {
         bar.innerHTML = `<span class="hint">This period is locked. Contact an admin if something needs changing.</span>`;
       } else {
@@ -672,8 +684,24 @@ async function renderMySheet() {
   $("month-next").disabled = atCurrentMonth;
   $("month-next").style.opacity = atCurrentMonth ? "0.35" : "1";
 
+  // super admin: no timesheet of their own — read-only preview of each role's sheet
+  if (isSuperAdmin(currentProfile)) {
+    $("my-sheet-title").textContent = "Timesheet Preview";
+    $("preview-role").classList.remove("hidden");
+    const previewProfile = {
+      id: currentUser.id,
+      role: $("preview-role").value,
+      hourly_rate: 2,
+      commission_rate: 0.03,
+    };
+    await renderUserSheet($("my-sheet-sections"), previewProfile, sheetMonth, "preview");
+    return;
+  }
+
   await renderUserSheet($("my-sheet-sections"), currentProfile, sheetMonth, "self");
 }
+
+$("preview-role").addEventListener("change", () => renderMySheet());
 
 // auto-rollover: when a new month starts, move anyone viewing the
 // (old) current month onto the new one automatically
@@ -737,6 +765,21 @@ async function renderTeam() {
   membersCache.forEach((m) => {
     const tr = document.createElement("tr");
     tr.dataset.memberRow = m.id;
+
+    if (isSuperAdmin(m)) {
+      tr.innerHTML = `
+        <td>${m.name || "—"}</td>
+        <td>${m.email}</td>
+        <td><span class="role-pill super_admin">${roleLabel(m.role)}</span></td>
+        <td class="col-num"><span class="hint">—</span></td>
+        <td class="col-num"><span class="hint">—</span></td>
+        <td><span class="hint">owner — not an employee</span></td>
+        <td>${m.id === currentUser.id ? '<span class="hint">you</span>' : ""}</td>
+      `;
+      body.appendChild(tr);
+      return;
+    }
+
     const commCell = isNonChatter(m)
       ? `<td class="col-num"><span class="hint">—</span></td><td><span class="hint">hourly only</span></td>`
       : `<td class="col-num"><input class="cell rate" data-member="${m.id}" data-rate-field="commission_rate" type="number" min="0" step="0.001" value="${m.commission_rate}"></td><td><span class="hint">commission as decimal — 0.03 = 3%</span></td>`;
@@ -1413,6 +1456,8 @@ async function renderPayroll() {
   ncBody.innerHTML = "";
 
   membersCache.forEach((m) => {
+    if (isSuperAdmin(m)) return; // super admin is not an employee — excluded from payroll
+
     const rows = (sheets || []).filter((s) => s.user_id === m.id);
     let h1Hours = 0, h2Hours = 0, commMonth = 0, netMonth = 0;
 

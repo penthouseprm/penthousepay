@@ -74,7 +74,11 @@
   <!-- ── MY TIMESHEET ── -->
   <main id="view-my-timesheet" class="view">
     <div class="view-head">
-      <h2>My Timesheet</h2>
+      <h2 id="my-sheet-title">My Timesheet</h2>
+      <select id="preview-role" class="hidden">
+        <option value="member">Chatter view</option>
+        <option value="non_chatter">Non-Chatter view</option>
+      </select>
       <div class="month-nav">
         <button id="month-prev" class="btn btn-ghost" type="button">‹</button>
         <span id="month-label" class="month-label"></span>
@@ -117,6 +121,7 @@
               <th class="col-num">Hourly rate $</th>
               <th class="col-num">Commission %</th>
               <th></th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody id="members-body"></tbody>
