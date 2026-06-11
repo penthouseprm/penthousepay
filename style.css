@@ -653,3 +653,34 @@ td.cell-payout.paid { color: var(--c-fv); }
 
 /* ════════════ UPDATE 7: non-chatter role ════════════ */
 .role-pill.non_chatter { background: rgba(138,146,166,0.14); color: var(--text-dim); }
+
+/* ════════════ UPDATE 8: fines ════════════ */
+.fine-chips-cell { max-width: 320px; white-space: normal !important; }
+.fine-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--c-total);
+  background: rgba(240,122,122,0.1);
+  border: 1px solid rgba(240,122,122,0.3);
+  border-radius: 99px;
+  padding: 3px 10px;
+  margin: 2px 4px 2px 0;
+}
+.fine-x {
+  background: none;
+  border: none;
+  color: var(--c-total);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0.7;
+}
+.fine-x:hover { opacity: 1; }
+.fine-reason {
+  width: 100%;
+  min-width: 140px;
+  font-size: 13px;
+  padding: 6px 10px;
+}

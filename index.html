@@ -188,6 +188,27 @@
         </table>
       </div>
     </section>
+
+    <section class="panel">
+      <h3>Fines</h3>
+      <p class="hint">Fines are deducted from the "Pay on 1st" figure in Payroll.</p>
+      <div class="table-scroll">
+        <table class="sheet plain" style="min-width: 850px;">
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>This month's fines</th>
+              <th class="col-num">Amount $</th>
+              <th>Reason</th>
+              <th></th>
+              <th class="col-num th-total">Total Fines $</th>
+            </tr>
+          </thead>
+          <tbody id="fines-body"></tbody>
+          <tfoot id="fines-foot"></tfoot>
+        </table>
+      </div>
+    </section>
   </main>
 
   <!-- ── PAYROLL (admin) ── -->
@@ -225,6 +246,7 @@
               <th class="col-num th-total">Total Net Sales $</th>
               <th class="col-num th-grey">Month Commission $</th>
               <th class="col-num th-grey">Bonuses $</th>
+              <th class="col-num th-total">Fines $</th>
               <th class="col-num th-payout">Pay on 15th $</th>
               <th class="col-num th-payout">Pay on 1st $</th>
               <th class="col-num">Month Total $</th>

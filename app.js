@@ -1099,16 +1099,18 @@ async function renderBonuses() {
   const [
     { data: members, error: memErr },
     { data: bonuses, error: bonErr },
+    { data: fines, error: finErr },
   ] = await Promise.all([
     db.from("profiles").select("*").order("name", { ascending: true }),
     db.from("bonuses").select("*").eq("month", mKey),
+    db.from("fines").select("*").eq("month", mKey).order("created_at", { ascending: true }),
   ]);
 
   const body = $("bonuses-body");
   body.innerHTML = "";
 
-  if (memErr || bonErr) {
-    body.innerHTML = `<tr><td colspan="7">Failed to load bonuses: ${(memErr || bonErr).message}</td></tr>`;
+  if (memErr || bonErr || finErr) {
+    body.innerHTML = `<tr><td colspan="7">Failed to load bonuses: ${(memErr || bonErr || finErr).message}</td></tr>`;
     return;
   }
   membersCache = members || [];
@@ -1133,7 +1135,80 @@ async function renderBonuses() {
   });
 
   recalcBonusTotals();
+
+  // ── FINES ──
+  const finesBody = $("fines-body");
+  finesBody.innerHTML = "";
+  let finesGrand = 0;
+
+  membersCache.filter((m) => !isNonChatter(m)).forEach((m) => {
+    const memberFines = (fines || []).filter((f) => f.user_id === m.id);
+    const totalFines = memberFines.reduce((sum, f) => sum + num(f.amount), 0);
+    finesGrand += totalFines;
+
+    const chipsHtml = memberFines.length
+      ? memberFines.map((f) => `
+          <span class="fine-chip">
+            ${fmt(f.amount)}${f.reason ? " — " + f.reason : ""}
+            <button class="fine-x" data-del-fine="${f.id}" type="button" title="Remove fine">✕</button>
+          </span>
+        `).join("")
+      : `<span class="hint">No fines</span>`;
+
+    const tr = document.createElement("tr");
+    tr.dataset.fineUser = m.id;
+    tr.innerHTML = `
+      <td>${m.name || m.email}</td>
+      <td class="fine-chips-cell">${chipsHtml}</td>
+      <td class="col-num"><input class="cell rate fine-amount" type="number" min="0" step="0.01" placeholder="0.00"></td>
+      <td><input class="fine-reason" type="text" placeholder="Reason (optional)"></td>
+      <td><button class="btn btn-ghost btn-small" data-add-fine type="button">+ Add fine</button></td>
+      <td class="col-num cell-total">${fmt(totalFines)}</td>
+    `;
+    finesBody.appendChild(tr);
+  });
+
+  $("fines-foot").innerHTML = `
+    <tr>
+      <td>ALL MEMBERS</td>
+      <td></td><td></td><td></td><td></td>
+      <td class="col-num cell-total">${fmt(finesGrand)}</td>
+    </tr>
+  `;
 }
+
+// add / remove fines
+$("fines-body").addEventListener("click", async (e) => {
+  const addBtn = e.target.closest("[data-add-fine]");
+  if (addBtn) {
+    const tr = addBtn.closest("tr");
+    const fineUserId = tr.dataset.fineUser;
+    const amount = num(tr.querySelector(".fine-amount").value);
+    const reason = tr.querySelector(".fine-reason").value.trim();
+
+    if (amount <= 0) { toast("Enter a fine amount.", true); return; }
+
+    const { error } = await db.from("fines").insert({
+      user_id: fineUserId,
+      month: bonusMonthKey(bonusMonth),
+      amount,
+      reason: reason || null,
+    });
+    if (error) { toast("Could not add fine: " + error.message, true); return; }
+    toast("Fine added");
+    renderBonuses();
+    return;
+  }
+
+  const delBtn = e.target.closest("[data-del-fine]");
+  if (delBtn) {
+    if (!confirm("Remove this fine?")) return;
+    const { error } = await db.from("fines").delete().eq("id", delBtn.dataset.delFine);
+    if (error) { toast("Could not remove fine: " + error.message, true); return; }
+    toast("Fine removed");
+    renderBonuses();
+  }
+});
 
 function readBonusRow(tr) {
   const get = (field) => num(tr.querySelector(`input[data-bfield="${field}"]`).value);
@@ -1235,24 +1310,26 @@ async function renderPayroll() {
     { data: subs, error: subErr },
     { data: pays, error: payErr },
     { data: monthBonuses, error: bonusErr },
+    { data: monthFines, error: fineErr },
   ] = await Promise.all([
     db.from("profiles").select("*").order("name", { ascending: true }),
     db.from("timesheets").select("*").gte("entry_date", first).lte("entry_date", last),
     db.from("submissions").select("*").in("period", pKeys),
     db.from("payments").select("*").in("period", [pay15Key, pay1Key]),
     db.from("bonuses").select("*").eq("month", bonusMonthKey(payMonth)),
+    db.from("fines").select("*").eq("month", bonusMonthKey(payMonth)),
   ]);
 
   const body = $("payroll-body");
   body.innerHTML = "";
 
-  if (memErr || shErr || subErr || payErr || bonusErr) {
-    body.innerHTML = `<tr><td colspan="10">Failed to load payroll data.</td></tr>`;
+  if (memErr || shErr || subErr || payErr || bonusErr || fineErr) {
+    body.innerHTML = `<tr><td colspan="11">Failed to load payroll data.</td></tr>`;
     return;
   }
   membersCache = members || [];
 
-  const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, bonus: 0, on15: 0, on1: 0, total: 0 };
+  const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, bonus: 0, fines: 0, on15: 0, on1: 0, total: 0 };
   const ncGrand = { h1Hours: 0, h2Hours: 0, on15: 0, on1: 0, total: 0 };
   const ncBody = $("payroll-nc-body");
   ncBody.innerHTML = "";
@@ -1320,9 +1397,12 @@ async function renderPayroll() {
     // ── CHATTERS: full payroll ──
     const bonusRow = (monthBonuses || []).find((b) => b.user_id === m.id);
     const bonusTotal = bonusRow ? calcBonusTotal(bonusRow) : 0;
+    const fineTotal = (monthFines || [])
+      .filter((f) => f.user_id === m.id)
+      .reduce((sum, f) => sum + num(f.amount), 0);
 
-    const payOn15 = h1Pay;                              // 15th: hours 1–14 only
-    const payOn1 = h2Pay + commMonth + bonusTotal;      // 1st: hours 15–end + ALL commission + bonuses
+    const payOn15 = h1Pay;                                          // 15th: hours 1–14 only
+    const payOn1 = h2Pay + commMonth + bonusTotal - fineTotal;      // 1st: hours 15–end + commission + bonuses − fines
     const monthTotal = payOn15 + payOn1;
 
     grand.h1Hours += h1Hours;
@@ -1330,6 +1410,7 @@ async function renderPayroll() {
     grand.comm += commMonth;
     grand.net += netMonth;
     grand.bonus += bonusTotal;
+    grand.fines += fineTotal;
     grand.on15 += payOn15;
     grand.on1 += payOn1;
     grand.total += monthTotal;
@@ -1343,6 +1424,7 @@ async function renderPayroll() {
       <td class="col-num cell-total">${fmt(netMonth)}</td>
       <td class="col-num cell-grey">${fmt(commMonth)}</td>
       <td class="col-num cell-grey">${fmt(bonusTotal)}</td>
+      <td class="col-num cell-total">${fineTotal > 0 ? "−" + fmt(fineTotal) : fmt(0)}</td>
       <td class="col-num cell-payout${paid15 ? " paid" : ""}">
         <label class="paid-wrap" title="Mark paid">
           <strong>${fmt(payOn15)}</strong>
@@ -1369,6 +1451,7 @@ async function renderPayroll() {
       <td class="col-num cell-total">${fmt(grand.net)}</td>
       <td class="col-num cell-grey">${fmt(grand.comm)}</td>
       <td class="col-num cell-grey">${fmt(grand.bonus)}</td>
+      <td class="col-num cell-total">${grand.fines > 0 ? "−" + fmt(grand.fines) : fmt(0)}</td>
       <td class="col-num cell-payout"><strong>${fmt(grand.on15)}</strong></td>
       <td class="col-num cell-payout"><strong>${fmt(grand.on1)}</strong></td>
       <td class="col-num"><strong>${fmt(grand.total)}</strong></td>
