@@ -762,3 +762,6 @@ td.cell-payout.paid { color: var(--c-fv); }
   border-radius: 6px;
 }
 .bonus-banner-x:hover { color: var(--text); background: var(--bg-row); }
+
+/* ════════════ UPDATE 15: member editing ════════════ */
+.edit-field { width: 100%; min-width: 130px; font-size: 13px; padding: 6px 10px; }

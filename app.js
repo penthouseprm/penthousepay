@@ -827,7 +827,7 @@ async function renderTeam() {
         <td class="col-num"><span class="hint">—</span></td>
         <td class="col-num"><span class="hint">—</span></td>
         <td><span class="hint">owner — not an employee</span></td>
-        <td>${m.id === currentUser.id ? '<span class="hint">you</span>' : ""}</td>
+        <td class="actions-cell">${isSuperAdmin(currentProfile) ? `<button class="btn btn-ghost btn-small" data-edit-member="${m.id}" type="button">Edit</button>` : ""}${m.id === currentUser.id ? '<span class="hint">you</span>' : ""}</td>
       `;
       body.appendChild(tr);
       return;
@@ -839,17 +839,21 @@ async function renderTeam() {
 
     const isSelf = m.id === currentUser.id;
     const isDeactivated = m.active === false;
+    const canEdit = isSuperAdmin(currentProfile);
+    const editBtn = canEdit ? `<button class="btn btn-ghost btn-small" data-edit-member="${m.id}" type="button">Edit</button>` : "";
     const firedBadge = m.fired ? ` <span class="fired-badge">FIRED</span>` : "";
     const deactivatedBadge = isDeactivated ? ` <span class="deactivated-badge">DEACTIVATED</span>` : "";
     let actionsCell;
     if (isSelf) {
-      actionsCell = `<td><span class="hint">you</span></td>`;
+      actionsCell = `<td class="actions-cell">${editBtn}<span class="hint">you</span></td>`;
     } else if (isDeactivated) {
       actionsCell = `<td class="actions-cell">
+        ${editBtn}
         <button class="btn btn-danger btn-small" data-remove-member="${m.id}" type="button">Remove</button>
       </td>`;
     } else {
       actionsCell = `<td class="actions-cell">
+        ${editBtn}
         ${m.fired
           ? `<button class="btn btn-ghost btn-small" data-unfire-member="${m.id}" type="button">Unfire</button>`
           : `<button class="btn btn-danger btn-small" data-fire-member="${m.id}" type="button">Fired</button>`}
@@ -869,8 +873,53 @@ async function renderTeam() {
   });
 }
 
-// fire / unfire / remove members
+// fire / unfire / remove / edit members
 $("members-body").addEventListener("click", async (e) => {
+  // enter edit mode (super admin only)
+  const editBtn = e.target.closest("[data-edit-member]");
+  if (editBtn) {
+    const m = membersCache.find((x) => x.id === editBtn.dataset.editMember);
+    if (!m) return;
+    const tr = $("members-body").querySelector(`tr[data-member-row="${m.id}"]`);
+    if (!tr) return;
+    tr.innerHTML = `
+      <td><input class="edit-field" data-edit-name value="${m.name || ""}" placeholder="Name"></td>
+      <td><input class="edit-field" data-edit-email type="email" value="${m.email}" placeholder="email@example.com"></td>
+      <td><span class="role-pill ${m.role}">${roleLabel(m.role)}</span></td>
+      <td colspan="3"><span class="hint">Editing name &amp; email — changing the email also changes their login</span></td>
+      <td class="actions-cell">
+        <button class="btn btn-primary btn-small" data-save-member="${m.id}" type="button">Save</button>
+        <button class="btn btn-ghost btn-small" data-cancel-edit type="button">Cancel</button>
+      </td>
+    `;
+    return;
+  }
+
+  // save edit
+  const saveBtn = e.target.closest("[data-save-member]");
+  if (saveBtn) {
+    const tr = saveBtn.closest("tr");
+    const newName = tr.querySelector("[data-edit-name]").value.trim();
+    const newEmail = tr.querySelector("[data-edit-email]").value.trim().toLowerCase();
+    if (!newName || !newEmail.includes("@")) { toast("Enter a valid name and email.", true); return; }
+
+    const { error } = await db.rpc("admin_update_member", {
+      target_id: saveBtn.dataset.saveMember,
+      new_name: newName,
+      new_email: newEmail,
+    });
+    if (error) { toast("Update failed: " + error.message, true); return; }
+    toast("Member updated ✓ They log in with the new email from now on.");
+    renderTeam();
+    return;
+  }
+
+  // cancel edit
+  if (e.target.closest("[data-cancel-edit]")) {
+    renderTeam();
+    return;
+  }
+
   const fireBtn = e.target.closest("[data-fire-member]");
   if (fireBtn) {
     const m = membersCache.find((x) => x.id === fireBtn.dataset.fireMember);
