@@ -1966,11 +1966,11 @@ async function renderPayroll() {
       <td>${badge(h1Sub, "1st half")} ${badge(h2Sub, "2nd half")}</td>
       <td class="col-num">${h1Hours}</td>
       <td class="col-num">${h2Hours}</td>
-      <td class="col-num cell-total">${fmt(netMonth)}</td>
+      <td class="col-num net-fv">${fmt(netMonth)}</td>
       <td class="col-num cell-grey">${fmt(commMonth)}</td>
       <td class="col-num cell-grey">${fmt(bonusTotal)}</td>
-      <td class="col-num cell-payout">${fmt(otTotal)}</td>
-      <td class="col-num cell-total">${fineTotal > 0 ? "−" + fmt(fineTotal) : fmt(0)}</td>
+      <td class="col-num cell-grey">${fmt(otTotal)}</td>
+      <td class="col-num cell-grey">${fineTotal > 0 ? "−" + fmt(fineTotal) : fmt(0)}</td>
       <td class="col-num cell-payout${paid15 ? " paid" : ""}">
         <label class="paid-wrap" title="Mark paid">
           <strong>${fmt(payOn15)}</strong>
@@ -1994,11 +1994,11 @@ async function renderPayroll() {
       <td></td>
       <td class="col-num">${grand.h1Hours}</td>
       <td class="col-num">${grand.h2Hours}</td>
-      <td class="col-num cell-total">${fmt(grand.net)}</td>
+      <td class="col-num net-fv">${fmt(grand.net)}</td>
       <td class="col-num cell-grey">${fmt(grand.comm)}</td>
       <td class="col-num cell-grey">${fmt(grand.bonus)}</td>
-      <td class="col-num cell-payout">${fmt(grand.ot)}</td>
-      <td class="col-num cell-total">${grand.fines > 0 ? "−" + fmt(grand.fines) : fmt(0)}</td>
+      <td class="col-num cell-grey">${fmt(grand.ot)}</td>
+      <td class="col-num cell-grey">${grand.fines > 0 ? "−" + fmt(grand.fines) : fmt(0)}</td>
       <td class="col-num cell-payout"><strong>${fmt(grand.on15)}</strong></td>
       <td class="col-num cell-payout"><strong>${fmt(grand.on1)}</strong></td>
       <td class="col-num"><strong>${fmt(grand.total)}</strong></td>
