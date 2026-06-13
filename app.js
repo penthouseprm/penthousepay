@@ -383,10 +383,24 @@ async function renderUserSheet(container, profile, monthDate, mode) {
   container.dataset.mode = mode;
   container.innerHTML = "";
 
-  const [rows, subs] = await Promise.all([
+  const { first, last } = monthRange(monthDate);
+  const [rows, subs, otData] = await Promise.all([
     loadMonthRows(profile.id, monthDate),
     loadSubmissions(profile.id, monthDate),
+    // approved overtime for this member in this month (skip in preview, no real user)
+    mode === "preview"
+      ? Promise.resolve({ data: [] })
+      : db.from("overtime_requests").select("*")
+          .eq("user_id", profile.id).eq("status", "approved")
+          .gte("ot_date", first).lte("ot_date", last),
   ]);
+
+  // map approved overtime by date → pay amount
+  const otByDate = {};
+  (otData.data || []).forEach((o) => {
+    const pay = num(o.hours) * num(profile.hourly_rate) * (1 + num(o.boost_pct) / 100);
+    otByDate[o.ot_date] = (otByDate[o.ot_date] || 0) + pay;
+  });
 
   const year = monthDate.getFullYear();
   const monthIdx = monthDate.getMonth();
@@ -438,16 +452,20 @@ async function renderUserSheet(container, profile, monthDate, mode) {
       if (isWeekend) tr.classList.add("weekend");
 
       const label = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
+      const otAmount = otByDate[date];
+      const otIcon = otAmount
+        ? ` <button class="ot-flag" type="button" data-ot-amount="${otAmount.toFixed(2)}" title="Overtime approved">⏱</button>`
+        : "";
 
       if (isNonChatter(profile)) {
         tr.innerHTML = `
-          <td class="col-date">${label}</td>
+          <td class="col-date">${label}${otIcon}</td>
           <td class="col-num"><input class="cell hours" data-field="hours" type="number" min="0" step="0.5" value="${row.hours || ""}" placeholder="–" ${dis}></td>
           <td class="col-num cell-pay" data-cell="pay"></td>
         `;
       } else {
         tr.innerHTML = `
-          <td class="col-date">${label}</td>
+          <td class="col-date">${label}${otIcon}</td>
           <td class="col-num"><input class="cell hours" data-field="hours" type="number" min="0" step="0.5" value="${row.hours || ""}" placeholder="–" ${dis}></td>
           <td class="col-num"><input class="cell" data-field="of_gross" type="number" min="0" step="0.01" value="${row.of_gross || ""}" placeholder="–" ${dis}></td>
           <td class="col-num net-of" data-cell="of-net"></td>
@@ -777,6 +795,16 @@ setInterval(() => {
 
 $("my-sheet-sections").addEventListener("input", handleSheetInput);
 $("member-sheet-sections").addEventListener("input", handleSheetInput);
+
+// overtime flag click → small popup
+function handleOtFlagClick(e) {
+  const flag = e.target.closest(".ot-flag");
+  if (!flag) return;
+  const amount = "$" + num(flag.dataset.otAmount).toFixed(2);
+  toast(`Overtime request accepted. ${amount} added to next pay.`);
+}
+$("my-sheet-sections").addEventListener("click", handleOtFlagClick);
+$("member-sheet-sections").addEventListener("click", handleOtFlagClick);
 
 // ════════════════════════════════════════════════════════════
 // TEAM (admin)

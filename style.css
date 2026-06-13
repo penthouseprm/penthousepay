@@ -768,3 +768,18 @@ td.cell-payout.paid { color: var(--c-fv); }
 
 /* ════════════ UPDATE 16: overtime ════════════ */
 .status-pill.rejected { background: rgba(240,122,122,0.14); color: var(--c-total); }
+
+/* ════════════ UPDATE 17: overtime flag on timesheet ════════════ */
+.ot-flag {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 1px 5px;
+  cursor: pointer;
+  margin-left: 4px;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+.ot-flag:hover { background: var(--accent); color: #14110A; }
