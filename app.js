@@ -79,6 +79,16 @@ function isSuperAdmin(profile) {
   return profile.role === "super_admin";
 }
 
+function isTestUser(profile) {
+  // test accounts are hidden from all production/admin views
+  return profile.role === "test";
+}
+
+// strips test accounts out of any member list shown to admins
+function realMembers(list) {
+  return (list || []).filter((m) => !isTestUser(m));
+}
+
 function isNonChatter(profile) {
   // admins are classified as non-chatters: hourly-only timesheets,
   // no sales/commission, no bonuses, not eligible for sales teams.
@@ -235,7 +245,7 @@ async function init() {
   if (isAdminUser(profile)) {
     document.querySelectorAll(".admin-only").forEach((el) => el.classList.remove("hidden"));
   }
-  if (profile.role === "member") {
+  if (profile.role === "member" || profile.role === "test") {
     document.querySelectorAll(".member-only").forEach((el) => el.classList.remove("hidden"));
   }
 
@@ -865,7 +875,7 @@ async function renderTeam() {
     body.innerHTML = `<tr><td colspan="6">Could not load members: ${memErr.message}</td></tr>`;
     return;
   }
-  membersCache = members || [];
+  membersCache = realMembers(members);
 
   membersCache.forEach((m) => {
     const tr = document.createElement("tr");
@@ -1143,7 +1153,7 @@ async function renderTeamSales() {
     container.innerHTML = `<p class="hint">Failed to load team sales data.</p>`;
     return;
   }
-  membersCache = members || [];
+  membersCache = realMembers(members);
 
   // populate the create-form chips (all unchecked, chatters only)
   $("new-team-chips").innerHTML = membersCache
@@ -1440,7 +1450,7 @@ async function renderOvertimeRQ() {
     pendingList.innerHTML = `<p class="hint">Could not load requests.</p>`;
     return;
   }
-  membersCache = members || [];
+  membersCache = realMembers(members);
 
   const nameOf = (uid) => {
     const m = membersCache.find((x) => x.id === uid);
@@ -1451,8 +1461,12 @@ async function renderOvertimeRQ() {
     return m ? num(m.hourly_rate) : 0;
   };
 
-  const pending = (requests || []).filter((r) => r.status === "pending");
-  const decided = (requests || []).filter((r) => r.status !== "pending").slice(0, 30);
+  // only requests from real (non-test) members
+  const realIds = new Set(membersCache.map((m) => m.id));
+  const visibleReqs = (requests || []).filter((r) => realIds.has(r.user_id));
+
+  const pending = visibleReqs.filter((r) => r.status === "pending");
+  const decided = visibleReqs.filter((r) => r.status !== "pending").slice(0, 30);
 
   if (!pending.length) {
     pendingList.innerHTML = `<p class="hint">No pending requests.</p>`;
@@ -1583,7 +1597,7 @@ async function renderBonuses() {
     body.innerHTML = `<tr><td colspan="7">Failed to load bonuses: ${(memErr || bonErr || finErr).message}</td></tr>`;
     return;
   }
-  membersCache = members || [];
+  membersCache = realMembers(members);
 
   membersCache.filter((m) => !isNonChatter(m)).forEach((m) => {
     const b = (bonuses || []).find((x) => x.user_id === m.id) ||
@@ -1831,7 +1845,7 @@ async function renderPayroll() {
     body.innerHTML = `<tr><td colspan="12">Failed to load payroll data.</td></tr>`;
     return;
   }
-  membersCache = members || [];
+  membersCache = realMembers(members);
 
   const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, bonus: 0, ot: 0, fines: 0, on15: 0, on1: 0, total: 0 };
   const ncGrand = { h1Hours: 0, h2Hours: 0, on15: 0, on1: 0, total: 0 };
