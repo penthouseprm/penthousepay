@@ -235,6 +235,9 @@ async function init() {
   if (isAdminUser(profile)) {
     document.querySelectorAll(".admin-only").forEach((el) => el.classList.remove("hidden"));
   }
+  if (profile.role === "member") {
+    document.querySelectorAll(".member-only").forEach((el) => el.classList.remove("hidden"));
+  }
 
   $("auth-view").classList.add("hidden");
   $("app-view").classList.remove("hidden");
@@ -299,13 +302,15 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
     document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     const view = btn.dataset.view;
-    ["my-timesheet", "team", "team-sales", "bonuses", "payroll"].forEach((v) => {
+    ["my-timesheet", "overtime", "team", "team-sales", "bonuses", "overtime-rq", "payroll"].forEach((v) => {
       $("view-" + v).classList.toggle("hidden", v !== view);
     });
     if (view === "my-timesheet") renderMySheet();
+    if (view === "overtime") renderOvertime();
     if (view === "team") renderTeam();
     if (view === "team-sales") renderTeamSales();
     if (view === "bonuses") renderBonuses();
+    if (view === "overtime-rq") renderOvertimeRQ();
     if (view === "payroll") renderPayroll();
   });
 });
@@ -1285,6 +1290,201 @@ $("teams-container").addEventListener("click", async (e) => {
 });
 
 // ════════════════════════════════════════════════════════════
+// OVERTIME (chatters)
+// ════════════════════════════════════════════════════════════
+function otStatusPill(r) {
+  if (r.status === "approved") return `<span class="status-pill submitted">Approved +${num(r.boost_pct)}%</span>`;
+  if (r.status === "rejected") return `<span class="status-pill rejected">Rejected</span>`;
+  return `<span class="status-pill open">Pending</span>`;
+}
+
+function otDateLabel(d) {
+  return new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", weekday: "short" });
+}
+
+async function renderOvertime() {
+  // date input can't be in the future
+  const now = new Date();
+  $("ot-date").max = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const { data: requests, error } = await db
+    .from("overtime_requests")
+    .select("*")
+    .eq("user_id", currentUser.id)
+    .order("created_at", { ascending: false });
+
+  const list = $("ot-my-list");
+  list.innerHTML = "";
+
+  if (error) {
+    list.innerHTML = `<p class="hint">Could not load requests: ${error.message}</p>`;
+    return;
+  }
+  if (!requests || !requests.length) {
+    list.innerHTML = `<p class="hint">No overtime requests yet.</p>`;
+    return;
+  }
+
+  requests.forEach((r) => {
+    const item = document.createElement("div");
+    item.className = "invite-item";
+    item.innerHTML = `
+      <span><strong>${otDateLabel(r.ot_date)}</strong> · ${num(r.hours)} hour${num(r.hours) === 1 ? "" : "s"}${r.note ? ` · <span class="hint">${r.note}</span>` : ""}</span>
+      ${otStatusPill(r)}
+      <span class="spacer"></span>
+      ${r.status === "pending" ? `<button class="btn btn-danger btn-small" data-cancel-ot="${r.id}" type="button">Cancel</button>` : ""}
+    `;
+    list.appendChild(item);
+  });
+}
+
+$("btn-submit-ot").addEventListener("click", async () => {
+  const otDate = $("ot-date").value;
+  const hours = num($("ot-hours").value);
+  const note = $("ot-note").value.trim();
+
+  if (!otDate) { toast("Select the date you worked overtime.", true); return; }
+  if (hours <= 0) { toast("Enter your overtime hours.", true); return; }
+
+  const { error } = await db.from("overtime_requests").insert({
+    user_id: currentUser.id,
+    ot_date: otDate,
+    hours,
+    note: note || null,
+  });
+  if (error) { toast("Could not submit request: " + error.message, true); return; }
+
+  $("ot-date").value = "";
+  $("ot-hours").value = "";
+  $("ot-note").value = "";
+  toast("Overtime request submitted ✓");
+  renderOvertime();
+});
+
+$("ot-my-list").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-cancel-ot]");
+  if (!btn) return;
+  if (!confirm("Cancel this overtime request?")) return;
+
+  const { error } = await db.from("overtime_requests").delete().eq("id", btn.dataset.cancelOt);
+  if (error) { toast("Could not cancel: " + error.message, true); return; }
+  toast("Request cancelled");
+  renderOvertime();
+});
+
+// ════════════════════════════════════════════════════════════
+// OVERTIME RQ (admin)
+// ════════════════════════════════════════════════════════════
+async function renderOvertimeRQ() {
+  const [
+    { data: requests, error: rErr },
+    { data: members, error: mErr },
+  ] = await Promise.all([
+    db.from("overtime_requests").select("*").order("created_at", { ascending: false }),
+    db.from("profiles").select("*"),
+  ]);
+
+  const pendingList = $("ot-pending-list");
+  const decidedList = $("ot-decided-list");
+  pendingList.innerHTML = "";
+  decidedList.innerHTML = "";
+
+  if (rErr || mErr) {
+    pendingList.innerHTML = `<p class="hint">Could not load requests.</p>`;
+    return;
+  }
+  membersCache = members || [];
+
+  const nameOf = (uid) => {
+    const m = membersCache.find((x) => x.id === uid);
+    return m ? (m.name || m.email) : "Unknown";
+  };
+  const rateOf = (uid) => {
+    const m = membersCache.find((x) => x.id === uid);
+    return m ? num(m.hourly_rate) : 0;
+  };
+
+  const pending = (requests || []).filter((r) => r.status === "pending");
+  const decided = (requests || []).filter((r) => r.status !== "pending").slice(0, 30);
+
+  if (!pending.length) {
+    pendingList.innerHTML = `<p class="hint">No pending requests.</p>`;
+  }
+  pending.forEach((r) => {
+    const item = document.createElement("div");
+    item.className = "invite-item";
+    item.dataset.otId = r.id;
+    item.innerHTML = `
+      <span><strong>${nameOf(r.user_id)}</strong> · ${otDateLabel(r.ot_date)} · ${num(r.hours)} hr${r.note ? ` · <span class="hint">${r.note}</span>` : ""}</span>
+      <span class="spacer"></span>
+      <label class="team-target-label">Boost %
+        <input class="cell rate ot-pct" type="number" min="0" step="5" value="50" style="width: 70px;">
+      </label>
+      <span class="hint ot-preview" data-rate="${rateOf(r.user_id)}" data-hours="${num(r.hours)}"></span>
+      <button class="btn btn-primary btn-small" data-approve-ot="${r.id}" type="button">Approve</button>
+      <button class="btn btn-danger btn-small" data-reject-ot="${r.id}" type="button">Reject</button>
+    `;
+    pendingList.appendChild(item);
+    updateOtPreview(item);
+  });
+
+  if (!decided.length) {
+    decidedList.innerHTML = `<p class="hint">No decisions yet.</p>`;
+  }
+  decided.forEach((r) => {
+    const item = document.createElement("div");
+    item.className = "invite-item";
+    item.innerHTML = `
+      <span><strong>${nameOf(r.user_id)}</strong> · ${otDateLabel(r.ot_date)} · ${num(r.hours)} hr${r.note ? ` · <span class="hint">${r.note}</span>` : ""}</span>
+      ${otStatusPill(r)}
+    `;
+    decidedList.appendChild(item);
+  });
+}
+
+function updateOtPreview(item) {
+  const pct = num(item.querySelector(".ot-pct").value);
+  const preview = item.querySelector(".ot-preview");
+  const rate = num(preview.dataset.rate);
+  const hours = num(preview.dataset.hours);
+  const boosted = rate * (1 + pct / 100);
+  preview.textContent = `→ ${fmt(boosted)}/hr × ${hours} = ${fmt(boosted * hours)}`;
+}
+
+$("ot-pending-list").addEventListener("input", (e) => {
+  if (!e.target.classList.contains("ot-pct")) return;
+  updateOtPreview(e.target.closest(".invite-item"));
+});
+
+$("ot-pending-list").addEventListener("click", async (e) => {
+  const approveBtn = e.target.closest("[data-approve-ot]");
+  if (approveBtn) {
+    const item = approveBtn.closest(".invite-item");
+    const pct = num(item.querySelector(".ot-pct").value);
+    if (pct < 0) { toast("Boost % can't be negative.", true); return; }
+
+    const { error } = await db.from("overtime_requests")
+      .update({ status: "approved", boost_pct: pct, decided_at: new Date().toISOString() })
+      .eq("id", approveBtn.dataset.approveOt);
+    if (error) { toast("Could not approve: " + error.message, true); return; }
+    toast(`Approved with +${pct}% boost ✓`);
+    renderOvertimeRQ();
+    return;
+  }
+
+  const rejectBtn = e.target.closest("[data-reject-ot]");
+  if (rejectBtn) {
+    if (!confirm("Reject this overtime request?")) return;
+    const { error } = await db.from("overtime_requests")
+      .update({ status: "rejected", decided_at: new Date().toISOString() })
+      .eq("id", rejectBtn.dataset.rejectOt);
+    if (error) { toast("Could not reject: " + error.message, true); return; }
+    toast("Request rejected");
+    renderOvertimeRQ();
+  }
+});
+
+// ════════════════════════════════════════════════════════════
 // BONUSES (admin)
 // ════════════════════════════════════════════════════════════
 function bonusMonthKey(d) {
@@ -1566,6 +1766,7 @@ async function renderPayroll() {
     { data: pays, error: payErr },
     { data: monthBonuses, error: bonusErr },
     { data: monthFines, error: fineErr },
+    { data: monthOT, error: otErr },
   ] = await Promise.all([
     db.from("profiles").select("*").order("name", { ascending: true }),
     db.from("timesheets").select("*").gte("entry_date", first).lte("entry_date", last),
@@ -1573,18 +1774,19 @@ async function renderPayroll() {
     db.from("payments").select("*").in("period", [pay15Key, pay1Key]),
     db.from("bonuses").select("*").eq("month", bonusMonthKey(payMonth)),
     db.from("fines").select("*").eq("month", bonusMonthKey(payMonth)),
+    db.from("overtime_requests").select("*").eq("status", "approved").gte("ot_date", first).lte("ot_date", last),
   ]);
 
   const body = $("payroll-body");
   body.innerHTML = "";
 
-  if (memErr || shErr || subErr || payErr || bonusErr || fineErr) {
-    body.innerHTML = `<tr><td colspan="11">Failed to load payroll data.</td></tr>`;
+  if (memErr || shErr || subErr || payErr || bonusErr || fineErr || otErr) {
+    body.innerHTML = `<tr><td colspan="12">Failed to load payroll data.</td></tr>`;
     return;
   }
   membersCache = members || [];
 
-  const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, bonus: 0, fines: 0, on15: 0, on1: 0, total: 0 };
+  const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, bonus: 0, ot: 0, fines: 0, on15: 0, on1: 0, total: 0 };
   const ncGrand = { h1Hours: 0, h2Hours: 0, on15: 0, on1: 0, total: 0 };
   const ncBody = $("payroll-nc-body");
   ncBody.innerHTML = "";
@@ -1666,12 +1868,22 @@ async function renderPayroll() {
       .filter((f) => f.user_id === m.id)
       .reduce((sum, f) => sum + num(f.amount), 0);
 
-    let payOn15 = h1Pay;                                          // 15th: hours 1–14 only
-    let payOn1 = h2Pay + commMonth + bonusTotal - fineTotal;      // 1st: hours 15–end + commission + bonuses − fines
+    // approved overtime: hours × hourly × (1 + boost%), split by pay period date
+    let ot15Pay = 0, ot1Pay = 0;
+    (monthOT || []).filter((o) => o.user_id === m.id).forEach((o) => {
+      const otPay = num(o.hours) * num(m.hourly_rate) * (1 + num(o.boost_pct) / 100);
+      const otDay = parseInt(o.ot_date.slice(8), 10);
+      if (otDay <= 14) ot15Pay += otPay;
+      else ot1Pay += otPay;
+    });
+    const otTotal = ot15Pay + ot1Pay;
+
+    let payOn15 = h1Pay + ot15Pay;                                          // 15th: hours 1–14 + their overtime
+    let payOn1 = h2Pay + commMonth + bonusTotal + ot1Pay - fineTotal;       // 1st: hours 15–end + commission + bonuses + overtime − fines
 
     // fired: full remaining pay (incl. commission & bonuses) lands on the next unpaid payday
     if (m.fired && !paid15) {
-      payOn15 = h1Pay + h2Pay + commMonth + bonusTotal - fineTotal;
+      payOn15 = h1Pay + h2Pay + commMonth + bonusTotal + otTotal - fineTotal;
       payOn1 = 0;
     }
     const monthTotal = payOn15 + payOn1;
@@ -1681,6 +1893,7 @@ async function renderPayroll() {
     grand.comm += commMonth;
     grand.net += netMonth;
     grand.bonus += bonusTotal;
+    grand.ot += otTotal;
     grand.fines += fineTotal;
     grand.on15 += payOn15;
     grand.on1 += payOn1;
@@ -1695,6 +1908,7 @@ async function renderPayroll() {
       <td class="col-num cell-total">${fmt(netMonth)}</td>
       <td class="col-num cell-grey">${fmt(commMonth)}</td>
       <td class="col-num cell-grey">${fmt(bonusTotal)}</td>
+      <td class="col-num cell-payout">${fmt(otTotal)}</td>
       <td class="col-num cell-total">${fineTotal > 0 ? "−" + fmt(fineTotal) : fmt(0)}</td>
       <td class="col-num cell-payout${paid15 ? " paid" : ""}">
         <label class="paid-wrap" title="Mark paid">
@@ -1722,6 +1936,7 @@ async function renderPayroll() {
       <td class="col-num cell-total">${fmt(grand.net)}</td>
       <td class="col-num cell-grey">${fmt(grand.comm)}</td>
       <td class="col-num cell-grey">${fmt(grand.bonus)}</td>
+      <td class="col-num cell-payout">${fmt(grand.ot)}</td>
       <td class="col-num cell-total">${grand.fines > 0 ? "−" + fmt(grand.fines) : fmt(0)}</td>
       <td class="col-num cell-payout"><strong>${fmt(grand.on15)}</strong></td>
       <td class="col-num cell-payout"><strong>${fmt(grand.on1)}</strong></td>

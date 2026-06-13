@@ -765,3 +765,6 @@ td.cell-payout.paid { color: var(--c-fv); }
 
 /* ════════════ UPDATE 15: member editing ════════════ */
 .edit-field { width: 100%; min-width: 130px; font-size: 13px; padding: 6px 10px; }
+
+/* ════════════ UPDATE 16: overtime ════════════ */
+.status-pill.rejected { background: rgba(240,122,122,0.14); color: var(--c-total); }
