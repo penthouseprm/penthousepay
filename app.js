@@ -796,15 +796,34 @@ setInterval(() => {
 $("my-sheet-sections").addEventListener("input", handleSheetInput);
 $("member-sheet-sections").addEventListener("input", handleSheetInput);
 
-// overtime flag click → small popup
+// overtime flag click → small popover anchored to the icon
 function handleOtFlagClick(e) {
   const flag = e.target.closest(".ot-flag");
+
+  // close any open popover when clicking elsewhere
+  document.querySelectorAll(".ot-popover").forEach((p) => p.remove());
   if (!flag) return;
+
+  e.stopPropagation();
   const amount = "$" + num(flag.dataset.otAmount).toFixed(2);
-  toast(`Overtime request accepted. ${amount} added to next pay.`);
+
+  const pop = document.createElement("div");
+  pop.className = "ot-popover";
+  pop.innerHTML = `Overtime request accepted.<br><strong>${amount}</strong> added to next pay.`;
+
+  // anchor relative to the icon
+  const wrap = flag.closest("td");
+  wrap.style.position = "relative";
+  wrap.appendChild(pop);
 }
 $("my-sheet-sections").addEventListener("click", handleOtFlagClick);
 $("member-sheet-sections").addEventListener("click", handleOtFlagClick);
+// click anywhere else closes the popover
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".ot-flag") && !e.target.closest(".ot-popover")) {
+    document.querySelectorAll(".ot-popover").forEach((p) => p.remove());
+  }
+});
 
 // ════════════════════════════════════════════════════════════
 // TEAM (admin)
