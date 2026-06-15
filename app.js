@@ -56,7 +56,7 @@ function halfLabel(monthDate, half) {
 }
 
 function fmt(n) {
-  return "$" + (Number(n) || 0).toFixed(2);
+  return "$" + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function num(v) {
@@ -1847,7 +1847,8 @@ async function renderPayroll() {
   }
   membersCache = realMembers(members);
 
-  const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, bonus: 0, ot: 0, fines: 0, on15: 0, on1: 0, total: 0 };
+  const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, bonus: 0, ot: 0, fines: 0, on15: 0, on1: 0, total: 0,
+                  ofNet: 0, fvNet: 0, slushyNet: 0, fanslyNet: 0 };
   const ncGrand = { h1Hours: 0, h2Hours: 0, on15: 0, on1: 0, total: 0 };
   const ncBody = $("payroll-nc-body");
   ncBody.innerHTML = "";
@@ -1865,6 +1866,13 @@ async function renderPayroll() {
       netMonth += calc.total;
       if (day <= 14) { h1Hours += num(r.hours); }
       else { h2Hours += num(r.hours); }
+      // platform breakdown only counts for chatters (non-chatters have no sales)
+      if (!isNonChatter(m)) {
+        grand.ofNet += calc.ofNet;
+        grand.fvNet += calc.fvNet;
+        grand.slushyNet += calc.slushyNet;
+        grand.fanslyNet += calc.fanslyNet;
+      }
     });
 
     const h1Pay = h1Hours * num(m.hourly_rate);
@@ -1994,7 +2002,7 @@ async function renderPayroll() {
       <td></td>
       <td class="col-num">${grand.h1Hours}</td>
       <td class="col-num">${grand.h2Hours}</td>
-      <td class="col-num net-fv">${fmt(grand.net)}</td>
+      <td class="col-num net-fv">${fmt(grand.net)} <button class="net-breakdown-btn" type="button" data-net-breakdown title="Platform breakdown">▦</button></td>
       <td class="col-num cell-grey">${fmt(grand.comm)}</td>
       <td class="col-num cell-grey">${fmt(grand.bonus)}</td>
       <td class="col-num cell-grey">${fmt(grand.ot)}</td>
@@ -2016,7 +2024,46 @@ async function renderPayroll() {
       <td class="col-num"><strong>${fmt(ncGrand.total)}</strong></td>
     </tr>
   `;
+
+  // stash the platform breakdown for the popover
+  payrollNetBreakdown = {
+    of: grand.ofNet,
+    fv: grand.fvNet,
+    slushy: grand.slushyNet,
+    fansly: grand.fanslyNet,
+    total: grand.net,
+  };
 }
+
+let payrollNetBreakdown = null;
+
+// net sales platform breakdown popover
+$("payroll-foot").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-net-breakdown]");
+  document.querySelectorAll(".net-popover").forEach((p) => p.remove());
+  if (!btn || !payrollNetBreakdown) return;
+
+  e.stopPropagation();
+  const b = payrollNetBreakdown;
+  const pop = document.createElement("div");
+  pop.className = "net-popover";
+  pop.innerHTML = `
+    <div class="net-popover-title">Net Sales by Platform</div>
+    <div class="net-popover-row"><span class="np-of">OnlyFans</span><span>${fmt(b.of)}</span></div>
+    <div class="net-popover-row"><span class="np-fv">FV</span><span>${fmt(b.fv)}</span></div>
+    <div class="net-popover-row"><span class="np-fansly">Fansly</span><span>${fmt(b.fansly)}</span></div>
+    <div class="net-popover-row"><span class="np-slushy">Slushy</span><span>${fmt(b.slushy)}</span></div>
+    <div class="net-popover-row net-popover-total"><span>Total</span><span>${fmt(b.total)}</span></div>
+  `;
+  const cell = btn.closest("td");
+  cell.style.position = "relative";
+  cell.appendChild(pop);
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("[data-net-breakdown]") && !e.target.closest(".net-popover")) {
+    document.querySelectorAll(".net-popover").forEach((p) => p.remove());
+  }
+});
 
 // toggle paid checkboxes (both chatter and non-chatter tables)
 async function handlePaidToggle(e) {
