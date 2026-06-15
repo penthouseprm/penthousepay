@@ -274,6 +274,12 @@ input:focus, select:focus { border-color: var(--accent); }
 }
 .sheet tbody tr:nth-child(odd) td { background: var(--bg-row-alt); }
 .sheet tbody tr:nth-child(even) td { background: var(--bg-row); }
+
+/* hover highlight on payroll rows for easier reading across wide tables */
+#payroll-body tr:hover td,
+#payroll-nc-body tr:hover td {
+  background: var(--accent-soft);
+}
 .sheet tbody tr.weekend td.col-date { color: var(--accent); }
 
 .col-date { font-weight: 600; min-width: 110px; }
