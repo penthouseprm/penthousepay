@@ -2037,7 +2037,7 @@ async function renderPayroll() {
 
 let payrollNetBreakdown = null;
 
-// net sales platform breakdown popover
+// net sales platform breakdown popover (fixed overlay so the table doesn't clip it)
 $("payroll-foot").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-net-breakdown]");
   document.querySelectorAll(".net-popover").forEach((p) => p.remove());
@@ -2055,9 +2055,18 @@ $("payroll-foot").addEventListener("click", (e) => {
     <div class="net-popover-row"><span class="np-slushy">Slushy</span><span>${fmt(b.slushy)}</span></div>
     <div class="net-popover-row net-popover-total"><span>Total</span><span>${fmt(b.total)}</span></div>
   `;
-  const cell = btn.closest("td");
-  cell.style.position = "relative";
-  cell.appendChild(pop);
+  document.body.appendChild(pop);
+
+  // position next to the icon, kept within the viewport
+  const r = btn.getBoundingClientRect();
+  const popW = pop.offsetWidth;
+  const popH = pop.offsetHeight;
+  let left = r.right - popW;            // right-align with the icon
+  let top = r.bottom + 6;
+  if (left < 8) left = 8;
+  if (top + popH > window.innerHeight - 8) top = r.top - popH - 6; // flip above if no room below
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
 });
 document.addEventListener("click", (e) => {
   if (!e.target.closest("[data-net-breakdown]") && !e.target.closest(".net-popover")) {
