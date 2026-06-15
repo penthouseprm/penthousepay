@@ -1913,16 +1913,16 @@ async function renderPayroll() {
         <td class="col-num">${h1Hours}</td>
         <td class="col-num">${h2Hours}</td>
         <td class="col-num cell-payout${paid15 ? " paid" : ""}">
-          <label class="paid-wrap" title="Mark paid">
-            <strong>${fmt(payOn15)}</strong>
+          <div class="paid-wrap">
+            <span class="pay-amount"><strong>${fmt(payOn15)}</strong></span>
             <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay15Key}" ${paid15 ? "checked" : ""}>
-          </label>
+          </div>
         </td>
         <td class="col-num cell-payout${paid1 ? " paid" : ""}">
-          <label class="paid-wrap" title="Mark paid">
-            <strong>${fmt(payOn1)}</strong>
+          <div class="paid-wrap">
+            <span class="pay-amount"><strong>${fmt(payOn1)}</strong></span>
             <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay1Key}" ${paid1 ? "checked" : ""}>
-          </label>
+          </div>
         </td>
         <td class="col-num"><strong>${fmt(monthTotal)}</strong></td>
       `;
@@ -1980,16 +1980,16 @@ async function renderPayroll() {
       <td class="col-num cell-grey">${fmt(otTotal)}</td>
       <td class="col-num cell-grey">${fineTotal > 0 ? "−" + fmt(fineTotal) : fmt(0)}</td>
       <td class="col-num cell-payout${paid15 ? " paid" : ""}">
-        <label class="paid-wrap" title="Mark paid">
-          <strong>${fmt(payOn15)}</strong>
+        <div class="paid-wrap">
+          <span class="pay-amount"><strong>${fmt(payOn15)}</strong></span>
           <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay15Key}" ${paid15 ? "checked" : ""}>
-        </label>
+        </div>
       </td>
       <td class="col-num cell-payout${paid1 ? " paid" : ""}">
-        <label class="paid-wrap" title="Mark paid">
-          <strong>${fmt(payOn1)}</strong>
+        <div class="paid-wrap">
+          <span class="pay-amount"><strong>${fmt(payOn1)}</strong></span>
           <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay1Key}" ${paid1 ? "checked" : ""}>
-        </label>
+        </div>
       </td>
       <td class="col-num"><strong>${fmt(monthTotal)}</strong></td>
     `;
@@ -2073,6 +2073,19 @@ document.addEventListener("click", (e) => {
     document.querySelectorAll(".net-popover").forEach((p) => p.remove());
   }
 });
+
+// click a pay figure to select its text (without toggling the paid checkbox)
+function handlePayAmountClick(e) {
+  const amt = e.target.closest(".pay-amount");
+  if (!amt) return;
+  const range = document.createRange();
+  range.selectNodeContents(amt);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+$("payroll-body").addEventListener("click", handlePayAmountClick);
+$("payroll-nc-body").addEventListener("click", handlePayAmountClick);
 
 // toggle paid checkboxes (both chatter and non-chatter tables)
 async function handlePaidToggle(e) {

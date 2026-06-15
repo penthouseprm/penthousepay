@@ -872,3 +872,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
   border-top: 1px solid var(--border);
   font-weight: 700;
 }
+
+/* ════════════ UPDATE 24: click-to-select pay amounts ════════════ */
+.pay-amount { cursor: text; }
+.pay-amount:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
