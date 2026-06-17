@@ -277,9 +277,20 @@ async function loadLeaveBanners() {
     const banner = document.createElement("div");
     const approved = ev.status === "approved";
     banner.className = "bonus-banner" + (approved ? "" : " leave-rejected");
+    let icon, text;
+    if (approved) {
+      icon = "🌴";
+      text = `Your leave request for <strong>${leaveRangeLabel(ev)}</strong> was <strong>approved</strong>.`;
+    } else if (ev.status === "cancelled") {
+      icon = "📋";
+      text = `Your approved leave for <strong>${leaveRangeLabel(ev)}</strong> has been <strong>cancelled</strong> by an admin.`;
+    } else {
+      icon = "📋";
+      text = `Your leave request for <strong>${leaveRangeLabel(ev)}</strong> was <strong>rejected</strong>.`;
+    }
     banner.innerHTML = `
-      <span class="bonus-banner-icon">${approved ? "🌴" : "📋"}</span>
-      <span class="bonus-banner-text">Your leave request for <strong>${leaveRangeLabel(ev)}</strong> was <strong>${approved ? "approved" : "rejected"}</strong>.</span>
+      <span class="bonus-banner-icon">${icon}</span>
+      <span class="bonus-banner-text">${text}</span>
       <button class="bonus-banner-x" data-seen-leave="${ev.id}" type="button" title="Dismiss">✕</button>
     `;
     container.appendChild(banner);
@@ -1629,6 +1640,7 @@ function daysUsedInPeriod(requests, periodKey) {
 function leaveStatusPill(r) {
   if (r.status === "approved") return `<span class="status-pill submitted">Approved</span>`;
   if (r.status === "rejected") return `<span class="status-pill rejected">Rejected</span>`;
+  if (r.status === "cancelled") return `<span class="status-pill rejected">Cancelled</span>`;
   return `<span class="status-pill open">Pending</span>`;
 }
 
@@ -1859,9 +1871,21 @@ async function renderLeaveRQ() {
   decided.forEach((r) => {
     const item = document.createElement("div");
     item.className = "invite-item";
+    const coverHtml = r.status === "approved"
+      ? `<label class="cover-wrap" title="Cover organised">
+           <input type="checkbox" class="cover-check" data-cover-leave="${r.id}" ${r.cover_organised ? "checked" : ""}>
+           Cover Organised
+         </label>`
+      : "";
+    const cancelHtml = r.status === "approved"
+      ? `<button class="btn btn-danger btn-small" data-cancel-leave-admin="${r.id}" type="button">Cancel</button>`
+      : "";
     item.innerHTML = `
       <span><strong>${nameOf(r.user_id)}</strong> · ${leaveRangeLabel(r)} · <span class="leave-reason-tag">${r.reason}</span></span>
       ${leaveStatusPill(r)}
+      <span class="spacer"></span>
+      ${coverHtml}
+      ${cancelHtml}
     `;
     decidedList.appendChild(item);
   });
@@ -1901,6 +1925,34 @@ $("leave-pending-list").addEventListener("click", async (e) => {
     toast("Request rejected");
     renderLeaveRQ();
   }
+});
+
+// recent decisions: cancel approved leave + toggle cover organised
+$("leave-decided-list").addEventListener("click", async (e) => {
+  const cancelBtn = e.target.closest("[data-cancel-leave-admin]");
+  if (cancelBtn) {
+    if (!confirm("Cancel this approved leave? It'll be removed from the calendar and the chatter will see it as Cancelled.")) return;
+    const { error } = await db.from("leave_requests")
+      .update({ status: "cancelled", seen: false, decided_at: new Date().toISOString() })
+      .eq("id", cancelBtn.dataset.cancelLeaveAdmin);
+    if (error) { toast("Could not cancel: " + error.message, true); return; }
+    toast("Leave cancelled");
+    renderLeaveRQ();
+  }
+});
+
+$("leave-decided-list").addEventListener("change", async (e) => {
+  const check = e.target;
+  if (!check.classList.contains("cover-check")) return;
+  const { error } = await db.from("leave_requests")
+    .update({ cover_organised: check.checked })
+    .eq("id", check.dataset.coverLeave);
+  if (error) {
+    check.checked = !check.checked;
+    toast("Could not update cover status: " + error.message, true);
+    return;
+  }
+  toast(check.checked ? "Marked cover organised ✓" : "Cover unmarked");
 });
 
 $("leave-cal-prev").addEventListener("click", () => {

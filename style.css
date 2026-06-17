@@ -962,3 +962,32 @@ input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
   cursor: pointer; padding: 0; font-weight: 600;
 }
 .leave-proof-link:hover { text-decoration: underline; }
+
+/* ════════════ UPDATE 28: leave cancel + cover organised ════════════ */
+.cover-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  margin-right: 4px;
+}
+.cover-check {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px; height: 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+.cover-check:checked { background: var(--c-fv); border-color: var(--c-fv); }
+.cover-check:checked::after {
+  content: "✓";
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 800; color: #0E1014;
+}
