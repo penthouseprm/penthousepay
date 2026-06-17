@@ -1955,6 +1955,46 @@ $("leave-decided-list").addEventListener("change", async (e) => {
   toast(check.checked ? "Marked cover organised ✓" : "Cover unmarked");
 });
 
+// ── admin: add own leave via topbar modal ──
+$("btn-add-own-leave").addEventListener("click", () => {
+  $("own-leave-from").value = "";
+  $("own-leave-to").value = "";
+  $("own-leave-note").value = "";
+  $("own-leave-reason").value = "personal";
+  $("add-leave-modal").classList.remove("hidden");
+});
+$("add-leave-close").addEventListener("click", () => $("add-leave-modal").classList.add("hidden"));
+$("add-leave-modal").addEventListener("click", (e) => {
+  if (e.target.id === "add-leave-modal") $("add-leave-modal").classList.add("hidden");
+});
+
+$("btn-save-own-leave").addEventListener("click", async () => {
+  const from = $("own-leave-from").value;
+  const to = $("own-leave-to").value;
+  const reason = $("own-leave-reason").value;
+  const note = $("own-leave-note").value.trim();
+
+  if (!from || !to) { toast("Select both dates.", true); return; }
+  if (leaveDays(from, to) <= 0) { toast("End date must be on or after the start date.", true); return; }
+
+  // admin's own leave is added directly as approved, and pre-seen (no self-notification)
+  const { error } = await db.from("leave_requests").insert({
+    user_id: currentUser.id,
+    from_date: from,
+    to_date: to,
+    reason,
+    note: note || null,
+    status: "approved",
+    seen: true,
+    decided_at: new Date().toISOString(),
+  });
+  if (error) { toast("Could not add leave: " + error.message, true); return; }
+
+  $("add-leave-modal").classList.add("hidden");
+  toast("Leave added to calendar ✓");
+  if (!$("view-leave-rq").classList.contains("hidden")) renderLeaveRQ();
+});
+
 $("leave-cal-prev").addEventListener("click", () => {
   leaveCalMonth = new Date(leaveCalMonth.getFullYear(), leaveCalMonth.getMonth() - 1, 1);
   renderLeaveCalendar();

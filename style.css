@@ -991,3 +991,44 @@ input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
   display: flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 800; color: #0E1014;
 }
+
+/* ════════════ UPDATE 29: add-own-leave modal ════════════ */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+  padding: 20px;
+}
+.modal-box {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px;
+  width: 100%;
+  max-width: 380px;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.modal-head h3 { font-size: 16px; }
+.modal-x {
+  background: none; border: none;
+  color: var(--text-dim); font-size: 15px;
+  cursor: pointer; padding: 4px 6px; border-radius: 6px;
+}
+.modal-x:hover { color: var(--text); background: var(--bg-row); }
+.modal-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 16px 0;
+}
+.modal-fields .team-target-label { flex-direction: column; align-items: stretch; gap: 5px; }
+.modal-fields input, .modal-fields select { width: 100%; }

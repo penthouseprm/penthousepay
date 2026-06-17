@@ -70,12 +70,42 @@
       </nav>
     </div>
     <div class="topbar-right">
+      <button id="btn-add-own-leave" class="btn btn-ghost admin-only hidden" type="button" title="Add my leave">+ Leave</button>
       <span id="user-name" class="user-name"></span>
       <button id="btn-logout" class="btn btn-ghost" type="button">Log out</button>
     </div>
   </header>
 
   <div id="bonus-banners"></div>
+
+  <!-- ── ADD OWN LEAVE MODAL (admin) ── -->
+  <div id="add-leave-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>Add my leave</h3>
+        <button id="add-leave-close" class="modal-x" type="button">✕</button>
+      </div>
+      <p class="hint">This is added straight to the calendar as approved leave.</p>
+      <div class="modal-fields">
+        <label class="team-target-label">From
+          <input type="date" id="own-leave-from">
+        </label>
+        <label class="team-target-label">To
+          <input type="date" id="own-leave-to">
+        </label>
+        <label class="team-target-label">Reason
+          <select id="own-leave-reason">
+            <option value="personal">Personal</option>
+            <option value="sick">Sick</option>
+          </select>
+        </label>
+        <label class="team-target-label">Note
+          <input type="text" id="own-leave-note" placeholder="Optional">
+        </label>
+      </div>
+      <button id="btn-save-own-leave" class="btn btn-primary btn-block" type="button">Add leave</button>
+    </div>
+  </div>
 
   <!-- ── MY TIMESHEET ── -->
   <main id="view-my-timesheet" class="view">
