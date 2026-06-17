@@ -1648,8 +1648,7 @@ async function renderRequestLeave() {
 
   $("leave-h1-label").textContent = `Jan 1 – Jun 30, ${now.getFullYear()}`;
   $("leave-h2-label").textContent = `Jul 1 – Dec 31, ${now.getFullYear()}`;
-  $("leave-from").min = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
-  $("leave-to").min = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
+  applyLeaveReasonRules();
 
   const { data: requests, error } = await db
     .from("leave_requests")
@@ -1689,6 +1688,30 @@ async function renderRequestLeave() {
   });
 }
 
+// reason changes which rules apply
+function applyLeaveReasonRules() {
+  const reason = $("leave-reason").value;
+  const now = new Date();
+  const todayIso = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
+
+  if (reason === "personal") {
+    // personal leave needs 7 days notice → earliest start is today + 7
+    const earliest = new Date(now.getTime() + 7 * 86400000);
+    const earliestIso = isoDate(earliest.getFullYear(), earliest.getMonth(), earliest.getDate());
+    $("leave-from").min = earliestIso;
+    $("leave-to").min = earliestIso;
+    $("leave-sick-upload").style.display = "none";
+    $("leave-reason-hint").textContent = "Personal leave requires at least 7 days notice.";
+  } else {
+    // sick leave: any date, proof upload available
+    $("leave-from").min = todayIso;
+    $("leave-to").min = todayIso;
+    $("leave-sick-upload").style.display = "";
+    $("leave-reason-hint").textContent = "You can attach a doctor's note or proof for sick leave.";
+  }
+}
+$("leave-reason").addEventListener("change", applyLeaveReasonRules);
+
 // live day-count preview
 function updateLeaveDayCount() {
   const from = $("leave-from").value;
@@ -1713,18 +1736,45 @@ $("btn-submit-leave").addEventListener("click", async () => {
   const days = leaveDays(from, to);
   if (days <= 0) { toast("End date must be on or after the start date.", true); return; }
 
+  // personal leave: at least 7 days notice
+  if (reason === "personal") {
+    const now = new Date();
+    const earliest = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
+    if (new Date(from + "T00:00:00") < earliest) {
+      toast("Personal leave needs at least 7 days notice.", true);
+      return;
+    }
+  }
+
+  // sick leave: optional proof upload
+  let proofPath = null;
+  const fileInput = $("leave-proof");
+  if (reason === "sick" && fileInput.files.length) {
+    const file = fileInput.files[0];
+    if (file.size > 10 * 1024 * 1024) { toast("File must be under 10MB.", true); return; }
+    const ext = file.name.split(".").pop();
+    const path = `${currentUser.id}/${Date.now()}.${ext}`;
+    $("btn-submit-leave").disabled = true;
+    const { error: upErr } = await db.storage.from("leave-proofs").upload(path, file);
+    $("btn-submit-leave").disabled = false;
+    if (upErr) { toast("Could not upload proof: " + upErr.message, true); return; }
+    proofPath = path;
+  }
+
   const { error } = await db.from("leave_requests").insert({
     user_id: currentUser.id,
     from_date: from,
     to_date: to,
     reason,
     note: note || null,
+    proof_path: proofPath,
   });
   if (error) { toast("Could not submit request: " + error.message, true); return; }
 
   $("leave-from").value = "";
   $("leave-to").value = "";
   $("leave-note").value = "";
+  fileInput.value = "";
   $("leave-day-count").textContent = "";
   toast("Leave request submitted ✓");
   renderRequestLeave();
@@ -1791,7 +1841,7 @@ async function renderLeaveRQ() {
     item.className = "invite-item leave-pending-item";
     item.innerHTML = `
       <div class="leave-pending-info">
-        <span><strong>${nameOf(r.user_id)}</strong> · ${leaveRangeLabel(r)} · ${days} day${days === 1 ? "" : "s"} · <span class="leave-reason-tag">${r.reason}</span>${r.note ? ` · <span class="hint">${r.note}</span>` : ""}</span>
+        <span><strong>${nameOf(r.user_id)}</strong> · ${leaveRangeLabel(r)} · ${days} day${days === 1 ? "" : "s"} · <span class="leave-reason-tag">${r.reason}</span>${r.note ? ` · <span class="hint">${r.note}</span>` : ""}${r.proof_path ? ` · <button class="leave-proof-link" data-proof="${r.proof_path}" type="button">📎 View proof</button>` : ""}</span>
         <span class="leave-remaining ${wouldExceed ? "over" : "ok"}">
           ${remaining} of ${LEAVE_ALLOWANCE} days left this period (${leavePeriodLabel(period)})${wouldExceed ? " — this request exceeds it!" : ""}
         </span>
@@ -1820,6 +1870,17 @@ async function renderLeaveRQ() {
 }
 
 $("leave-pending-list").addEventListener("click", async (e) => {
+  // view proof (signed URL)
+  const proofBtn = e.target.closest("[data-proof]");
+  if (proofBtn) {
+    const { data, error } = await db.storage
+      .from("leave-proofs")
+      .createSignedUrl(proofBtn.dataset.proof, 300);
+    if (error || !data) { toast("Could not open proof: " + (error ? error.message : "unknown"), true); return; }
+    window.open(data.signedUrl, "_blank");
+    return;
+  }
+
   const approveBtn = e.target.closest("[data-approve-leave]");
   if (approveBtn) {
     const { error } = await db.from("leave_requests")
