@@ -253,8 +253,47 @@ async function init() {
   $("app-view").classList.remove("hidden");
 
   loadBonusBanners();
+  loadLeaveBanners();
   renderMySheet();
 }
+
+// ── leave decision banners ──
+async function loadLeaveBanners() {
+  if (currentProfile.role !== "member") return;
+
+  const { data: events, error } = await db
+    .from("leave_requests")
+    .select("*")
+    .eq("user_id", currentUser.id)
+    .neq("status", "pending")
+    .eq("seen", false)
+    .order("decided_at", { ascending: true });
+
+  if (error || !events || !events.length) return;
+
+  const container = $("bonus-banners");
+
+  events.forEach((ev) => {
+    const banner = document.createElement("div");
+    const approved = ev.status === "approved";
+    banner.className = "bonus-banner" + (approved ? "" : " leave-rejected");
+    banner.innerHTML = `
+      <span class="bonus-banner-icon">${approved ? "🌴" : "📋"}</span>
+      <span class="bonus-banner-text">Your leave request for <strong>${leaveRangeLabel(ev)}</strong> was <strong>${approved ? "approved" : "rejected"}</strong>.</span>
+      <button class="bonus-banner-x" data-seen-leave="${ev.id}" type="button" title="Dismiss">✕</button>
+    `;
+    container.appendChild(banner);
+  });
+}
+
+$("bonus-banners").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-seen-leave]");
+  if (!btn) return;
+  const banner = btn.closest(".bonus-banner");
+  const { error } = await db.from("leave_requests").update({ seen: true }).eq("id", btn.dataset.seenLeave);
+  if (error) { toast("Could not dismiss: " + error.message, true); return; }
+  banner.remove();
+});
 
 // ── bonus celebration banners ──
 const BONUS_LABELS = {
@@ -312,15 +351,17 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
     document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     const view = btn.dataset.view;
-    ["my-timesheet", "overtime", "team", "team-sales", "bonuses", "overtime-rq", "payroll"].forEach((v) => {
+    ["my-timesheet", "overtime", "request-leave", "team", "team-sales", "bonuses", "overtime-rq", "leave-rq", "payroll"].forEach((v) => {
       $("view-" + v).classList.toggle("hidden", v !== view);
     });
     if (view === "my-timesheet") renderMySheet();
     if (view === "overtime") renderOvertime();
+    if (view === "request-leave") renderRequestLeave();
     if (view === "team") renderTeam();
     if (view === "team-sales") renderTeamSales();
     if (view === "bonuses") renderBonuses();
     if (view === "overtime-rq") renderOvertimeRQ();
+    if (view === "leave-rq") renderLeaveRQ();
     if (view === "payroll") renderPayroll();
   });
 });
@@ -1544,6 +1585,325 @@ $("ot-pending-list").addEventListener("click", async (e) => {
     renderOvertimeRQ();
   }
 });
+
+// ════════════════════════════════════════════════════════════
+// LEAVE — shared helpers
+// ════════════════════════════════════════════════════════════
+const LEAVE_ALLOWANCE = 7; // days per 6-month period
+
+// inclusive day count between two ISO dates
+function leaveDays(fromIso, toIso) {
+  const a = new Date(fromIso + "T00:00:00");
+  const b = new Date(toIso + "T00:00:00");
+  if (isNaN(a) || isNaN(b) || b < a) return 0;
+  return Math.round((b - a) / 86400000) + 1;
+}
+
+// which half-year a date falls in: 'YYYY-H1' (Jan–Jun) or 'YYYY-H2' (Jul–Dec)
+function leavePeriodOf(iso) {
+  const d = new Date(iso + "T00:00:00");
+  const half = d.getMonth() <= 5 ? "H1" : "H2";
+  return `${d.getFullYear()}-${half}`;
+}
+
+function leavePeriodLabel(periodKey) {
+  const [yr, half] = periodKey.split("-");
+  return half === "H1" ? `Jan 1 – Jun 30, ${yr}` : `Jul 1 – Dec 31, ${yr}`;
+}
+
+// days used by approved leave in a given period (handles ranges spanning the boundary)
+function daysUsedInPeriod(requests, periodKey) {
+  let used = 0;
+  requests.filter((r) => r.status === "approved").forEach((r) => {
+    let d = new Date(r.from_date + "T00:00:00");
+    const end = new Date(r.to_date + "T00:00:00");
+    while (d <= end) {
+      const iso = isoDate(d.getFullYear(), d.getMonth(), d.getDate());
+      if (leavePeriodOf(iso) === periodKey) used++;
+      d = new Date(d.getTime() + 86400000);
+    }
+  });
+  return used;
+}
+
+function leaveStatusPill(r) {
+  if (r.status === "approved") return `<span class="status-pill submitted">Approved</span>`;
+  if (r.status === "rejected") return `<span class="status-pill rejected">Rejected</span>`;
+  return `<span class="status-pill open">Pending</span>`;
+}
+
+function leaveRangeLabel(r) {
+  const f = otDateLabel(r.from_date);
+  if (r.from_date === r.to_date) return f;
+  return `${f} → ${otDateLabel(r.to_date)}`;
+}
+
+// ════════════════════════════════════════════════════════════
+// REQUEST LEAVE (chatters)
+// ════════════════════════════════════════════════════════════
+async function renderRequestLeave() {
+  const now = new Date();
+  const curH1 = `${now.getFullYear()}-H1`;
+  const curH2 = `${now.getFullYear()}-H2`;
+
+  $("leave-h1-label").textContent = `Jan 1 – Jun 30, ${now.getFullYear()}`;
+  $("leave-h2-label").textContent = `Jul 1 – Dec 31, ${now.getFullYear()}`;
+  $("leave-from").min = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
+  $("leave-to").min = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const { data: requests, error } = await db
+    .from("leave_requests")
+    .select("*")
+    .eq("user_id", currentUser.id)
+    .order("created_at", { ascending: false });
+
+  const list = $("leave-my-list");
+  list.innerHTML = "";
+
+  if (error) {
+    list.innerHTML = `<p class="hint">Could not load requests: ${error.message}</p>`;
+    return;
+  }
+
+  const reqs = requests || [];
+  const h1Used = daysUsedInPeriod(reqs, curH1);
+  const h2Used = daysUsedInPeriod(reqs, curH2);
+  $("leave-h1-left").parentElement.innerHTML = `<strong>${Math.max(0, LEAVE_ALLOWANCE - h1Used)}</strong> of ${LEAVE_ALLOWANCE} days left`;
+  $("leave-h2-left").parentElement.innerHTML = `<strong>${Math.max(0, LEAVE_ALLOWANCE - h2Used)}</strong> of ${LEAVE_ALLOWANCE} days left`;
+
+  if (!reqs.length) {
+    list.innerHTML = `<p class="hint">No leave requests yet.</p>`;
+    return;
+  }
+
+  reqs.forEach((r) => {
+    const item = document.createElement("div");
+    item.className = "invite-item";
+    item.innerHTML = `
+      <span><strong>${leaveRangeLabel(r)}</strong> · ${leaveDays(r.from_date, r.to_date)} day${leaveDays(r.from_date, r.to_date) === 1 ? "" : "s"} · <span class="leave-reason-tag">${r.reason}</span>${r.note ? ` · <span class="hint">${r.note}</span>` : ""}</span>
+      ${leaveStatusPill(r)}
+      <span class="spacer"></span>
+      ${r.status === "pending" ? `<button class="btn btn-danger btn-small" data-cancel-leave="${r.id}" type="button">Cancel</button>` : ""}
+    `;
+    list.appendChild(item);
+  });
+}
+
+// live day-count preview
+function updateLeaveDayCount() {
+  const from = $("leave-from").value;
+  const to = $("leave-to").value;
+  if (from && to) {
+    const days = leaveDays(from, to);
+    $("leave-day-count").textContent = days > 0 ? `This request is ${days} day${days === 1 ? "" : "s"}.` : "End date must be on or after the start date.";
+  } else {
+    $("leave-day-count").textContent = "";
+  }
+}
+$("leave-from").addEventListener("change", () => { $("leave-to").min = $("leave-from").value; updateLeaveDayCount(); });
+$("leave-to").addEventListener("change", updateLeaveDayCount);
+
+$("btn-submit-leave").addEventListener("click", async () => {
+  const from = $("leave-from").value;
+  const to = $("leave-to").value;
+  const reason = $("leave-reason").value;
+  const note = $("leave-note").value.trim();
+
+  if (!from || !to) { toast("Select both start and end dates.", true); return; }
+  const days = leaveDays(from, to);
+  if (days <= 0) { toast("End date must be on or after the start date.", true); return; }
+
+  const { error } = await db.from("leave_requests").insert({
+    user_id: currentUser.id,
+    from_date: from,
+    to_date: to,
+    reason,
+    note: note || null,
+  });
+  if (error) { toast("Could not submit request: " + error.message, true); return; }
+
+  $("leave-from").value = "";
+  $("leave-to").value = "";
+  $("leave-note").value = "";
+  $("leave-day-count").textContent = "";
+  toast("Leave request submitted ✓");
+  renderRequestLeave();
+});
+
+$("leave-my-list").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-cancel-leave]");
+  if (!btn) return;
+  if (!confirm("Cancel this leave request?")) return;
+  const { error } = await db.from("leave_requests").delete().eq("id", btn.dataset.cancelLeave);
+  if (error) { toast("Could not cancel: " + error.message, true); return; }
+  toast("Request cancelled");
+  renderRequestLeave();
+});
+
+// ════════════════════════════════════════════════════════════
+// LEAVE RQ (admin)
+// ════════════════════════════════════════════════════════════
+let leaveCalMonth = startOfMonth(new Date());
+let leaveAllData = [];
+
+async function renderLeaveRQ() {
+  const [
+    { data: requests, error: rErr },
+    { data: members, error: mErr },
+  ] = await Promise.all([
+    db.from("leave_requests").select("*").order("created_at", { ascending: false }),
+    db.from("profiles").select("*"),
+  ]);
+
+  const pendingList = $("leave-pending-list");
+  const decidedList = $("leave-decided-list");
+  pendingList.innerHTML = "";
+  decidedList.innerHTML = "";
+
+  if (rErr || mErr) {
+    pendingList.innerHTML = `<p class="hint">Could not load requests.</p>`;
+    return;
+  }
+  membersCache = realMembers(members);
+  const realIds = new Set(membersCache.map((m) => m.id));
+  leaveAllData = (requests || []).filter((r) => realIds.has(r.user_id));
+
+  const nameOf = (uid) => {
+    const m = membersCache.find((x) => x.id === uid);
+    return m ? (m.name || m.email) : "Unknown";
+  };
+
+  const pending = leaveAllData.filter((r) => r.status === "pending");
+  const decided = leaveAllData.filter((r) => r.status !== "pending").slice(0, 30);
+
+  if (!pending.length) {
+    pendingList.innerHTML = `<p class="hint">No pending requests.</p>`;
+  }
+  pending.forEach((r) => {
+    const period = leavePeriodOf(r.from_date);
+    const userReqs = leaveAllData.filter((x) => x.user_id === r.user_id);
+    const used = daysUsedInPeriod(userReqs, period);
+    const remaining = LEAVE_ALLOWANCE - used;
+    const days = leaveDays(r.from_date, r.to_date);
+    const wouldExceed = days > remaining;
+
+    const item = document.createElement("div");
+    item.className = "invite-item leave-pending-item";
+    item.innerHTML = `
+      <div class="leave-pending-info">
+        <span><strong>${nameOf(r.user_id)}</strong> · ${leaveRangeLabel(r)} · ${days} day${days === 1 ? "" : "s"} · <span class="leave-reason-tag">${r.reason}</span>${r.note ? ` · <span class="hint">${r.note}</span>` : ""}</span>
+        <span class="leave-remaining ${wouldExceed ? "over" : "ok"}">
+          ${remaining} of ${LEAVE_ALLOWANCE} days left this period (${leavePeriodLabel(period)})${wouldExceed ? " — this request exceeds it!" : ""}
+        </span>
+      </div>
+      <span class="spacer"></span>
+      <button class="btn btn-primary btn-small" data-approve-leave="${r.id}" type="button">Approve</button>
+      <button class="btn btn-danger btn-small" data-reject-leave="${r.id}" type="button">Reject</button>
+    `;
+    pendingList.appendChild(item);
+  });
+
+  if (!decided.length) {
+    decidedList.innerHTML = `<p class="hint">No decisions yet.</p>`;
+  }
+  decided.forEach((r) => {
+    const item = document.createElement("div");
+    item.className = "invite-item";
+    item.innerHTML = `
+      <span><strong>${nameOf(r.user_id)}</strong> · ${leaveRangeLabel(r)} · <span class="leave-reason-tag">${r.reason}</span></span>
+      ${leaveStatusPill(r)}
+    `;
+    decidedList.appendChild(item);
+  });
+
+  renderLeaveCalendar();
+}
+
+$("leave-pending-list").addEventListener("click", async (e) => {
+  const approveBtn = e.target.closest("[data-approve-leave]");
+  if (approveBtn) {
+    const { error } = await db.from("leave_requests")
+      .update({ status: "approved", decided_at: new Date().toISOString() })
+      .eq("id", approveBtn.dataset.approveLeave);
+    if (error) { toast("Could not approve: " + error.message, true); return; }
+    toast("Leave approved ✓");
+    renderLeaveRQ();
+    return;
+  }
+  const rejectBtn = e.target.closest("[data-reject-leave]");
+  if (rejectBtn) {
+    if (!confirm("Reject this leave request?")) return;
+    const { error } = await db.from("leave_requests")
+      .update({ status: "rejected", decided_at: new Date().toISOString() })
+      .eq("id", rejectBtn.dataset.rejectLeave);
+    if (error) { toast("Could not reject: " + error.message, true); return; }
+    toast("Request rejected");
+    renderLeaveRQ();
+  }
+});
+
+$("leave-cal-prev").addEventListener("click", () => {
+  leaveCalMonth = new Date(leaveCalMonth.getFullYear(), leaveCalMonth.getMonth() - 1, 1);
+  renderLeaveCalendar();
+});
+$("leave-cal-next").addEventListener("click", () => {
+  leaveCalMonth = new Date(leaveCalMonth.getFullYear(), leaveCalMonth.getMonth() + 1, 1);
+  renderLeaveCalendar();
+});
+
+function renderLeaveCalendar() {
+  $("leave-cal-label").textContent = monthLabel(leaveCalMonth);
+  const cal = $("leave-calendar");
+  cal.innerHTML = "";
+
+  const year = leaveCalMonth.getFullYear();
+  const monthIdx = leaveCalMonth.getMonth();
+  const firstDow = new Date(year, monthIdx, 1).getDay();
+  const total = daysInMonth(leaveCalMonth);
+
+  const nameOf = (uid) => {
+    const m = membersCache.find((x) => x.id === uid);
+    return m ? (m.name || m.email) : "Unknown";
+  };
+
+  // build a date → [names] map from approved leave
+  const byDate = {};
+  leaveAllData.filter((r) => r.status === "approved").forEach((r) => {
+    let d = new Date(r.from_date + "T00:00:00");
+    const end = new Date(r.to_date + "T00:00:00");
+    while (d <= end) {
+      if (d.getFullYear() === year && d.getMonth() === monthIdx) {
+        const day = d.getDate();
+        (byDate[day] = byDate[day] || []).push({ name: nameOf(r.user_id), reason: r.reason });
+      }
+      d = new Date(d.getTime() + 86400000);
+    }
+  });
+
+  ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].forEach((d) => {
+    const h = document.createElement("div");
+    h.className = "cal-dow";
+    h.textContent = d;
+    cal.appendChild(h);
+  });
+
+  for (let i = 0; i < firstDow; i++) {
+    const blank = document.createElement("div");
+    blank.className = "cal-cell empty";
+    cal.appendChild(blank);
+  }
+
+  for (let day = 1; day <= total; day++) {
+    const cell = document.createElement("div");
+    cell.className = "cal-cell";
+    const people = byDate[day] || [];
+    cell.innerHTML = `
+      <div class="cal-day-num">${day}</div>
+      ${people.map((p) => `<div class="cal-leave ${p.reason}">${p.name}</div>`).join("")}
+    `;
+    cal.appendChild(cell);
+  }
+}
 
 // ════════════════════════════════════════════════════════════
 // BONUSES (admin)

@@ -882,3 +882,68 @@ input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
 /* ════════════ UPDATE 24: click-to-select pay amounts ════════════ */
 .pay-amount { cursor: text; }
 .pay-amount:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
+
+/* ════════════ UPDATE 26: leave requests ════════════ */
+.leave-allowance { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+.leave-allow-card {
+  flex: 1; min-width: 220px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.leave-allow-period {
+  font-family: var(--font-display); font-weight: 700;
+  font-size: 13.5px; color: var(--accent);
+}
+.leave-allow-count { font-size: 13px; color: var(--text-dim); }
+.leave-allow-count strong { color: var(--text); font-size: 18px; }
+
+.leave-reason-tag {
+  font-size: 11px; font-weight: 700; text-transform: capitalize;
+  padding: 1px 8px; border-radius: 99px;
+  background: rgba(91,141,239,0.14); color: var(--c-of);
+}
+
+.leave-pending-item { align-items: flex-start; }
+.leave-pending-info { display: flex; flex-direction: column; gap: 4px; }
+.leave-remaining { font-size: 12px; }
+.leave-remaining.ok { color: var(--text-dim); }
+.leave-remaining.over { color: var(--c-total); font-weight: 600; }
+
+.bonus-banner.leave-rejected { border-color: var(--c-total); background: rgba(240,122,122,0.08); }
+
+/* calendar */
+.leave-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.cal-dow {
+  text-align: center; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-dim); padding: 6px 0;
+}
+.cal-cell {
+  min-height: 74px;
+  background: var(--bg-row-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.cal-cell.empty { background: transparent; border: none; }
+.cal-day-num { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.cal-leave {
+  font-size: 10.5px; font-weight: 600;
+  padding: 2px 6px; border-radius: 5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cal-leave.sick { background: rgba(240,122,122,0.16); color: var(--c-total); }
+.cal-leave.personal { background: rgba(91,141,239,0.16); color: var(--c-of); }
+
+@media (max-width: 720px) {
+  .cal-cell { min-height: 54px; }
+  .cal-leave { font-size: 9px; }
+}
