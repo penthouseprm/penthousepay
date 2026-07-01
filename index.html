@@ -307,6 +307,27 @@
     </section>
 
     <div id="teams-container" class="sheet-sections"></div>
+
+    <!-- ── MANAGER TEAMS ── -->
+    <section class="panel" style="margin-top: 24px;">
+      <button class="team-row" id="mgr-toggle" type="button">
+        <span class="team-row-name">Manager Teams</span>
+        <span class="team-row-meta">assign chatters to a manager (one team each)</span>
+        <span class="spacer"></span>
+        <span class="team-chevron" id="mgr-chevron">▾</span>
+      </button>
+      <div id="mgr-detail" class="team-detail hidden">
+        <div class="invite-row" style="margin-bottom: 16px;">
+          <input type="text" id="new-mgr-name" placeholder="Team name (e.g. Ethan's Team)">
+          <label class="team-target-label" style="flex-direction: row; align-items: center; gap: 7px;">
+            <input type="checkbox" id="new-mgr-floater" class="cover-check">
+            Floater team
+          </label>
+          <button id="btn-create-mgr" class="btn btn-primary" type="button">Create Team</button>
+        </div>
+        <div id="mgr-teams-container" class="sheet-sections"></div>
+      </div>
+    </section>
   </main>
 
   <!-- ── BONUSES (admin) ── -->

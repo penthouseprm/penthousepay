@@ -1032,3 +1032,16 @@ input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
 }
 .modal-fields .team-target-label { flex-direction: column; align-items: stretch; gap: 5px; }
 .modal-fields input, .modal-fields select { width: 100%; }
+
+/* ════════════ UPDATE 30: manager teams ════════════ */
+.floater-badge {
+  display: inline-block;
+  font-size: 10px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 2px 8px; border-radius: 99px;
+  background: rgba(63,211,224,0.14); color: var(--c-fansly);
+  border: 1px solid rgba(63,211,224,0.4);
+  margin-left: 6px; vertical-align: middle;
+}
+.mgr-net { color: var(--c-fv); }
+.chip-elsewhere { color: var(--text-dim); font-size: 11px; font-weight: 400; }

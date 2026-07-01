@@ -1352,10 +1352,189 @@ async function renderTeamSales() {
 
     container.appendChild(section);
   });
+
+  renderManagerTeams();
 }
 
-// delegated handlers: team edits, member toggles, delete
-let teamFieldTimers = {};
+// ════════════════════════════════════════════════════════════
+// MANAGER TEAMS — exclusive rosters + net sales
+// ════════════════════════════════════════════════════════════
+let mgrExpanded = new Set();
+
+$("mgr-toggle").addEventListener("click", () => {
+  const detail = $("mgr-detail");
+  const chevron = $("mgr-chevron");
+  const open = detail.classList.contains("hidden");
+  detail.classList.toggle("hidden", !open);
+  chevron.classList.toggle("open", open);
+  if (open) renderManagerTeams();
+});
+
+$("btn-create-mgr").addEventListener("click", async () => {
+  const name = $("new-mgr-name").value.trim();
+  const isFloater = $("new-mgr-floater").checked;
+  if (!name) { toast("Enter a team name.", true); return; }
+
+  const { data: created, error } = await db
+    .from("manager_teams")
+    .insert({ name, is_floater: isFloater })
+    .select()
+    .single();
+  if (error || !created) { toast("Could not create team: " + (error ? error.message : "error"), true); return; }
+
+  $("new-mgr-name").value = "";
+  $("new-mgr-floater").checked = false;
+  mgrExpanded.add(created.id);
+  toast("Manager team created ✓");
+  renderManagerTeams();
+});
+
+async function renderManagerTeams() {
+  const container = $("mgr-teams-container");
+  if (!container) return;
+
+  const { first, last } = monthRange(teamMonth);
+  const [
+    { data: mgrTeams, error: tErr },
+    { data: assignments, error: aErr },
+    { data: members, error: mErr },
+  ] = await Promise.all([
+    db.from("manager_teams").select("*").order("is_floater", { ascending: true }).order("created_at", { ascending: true }),
+    db.from("manager_team_members").select("*"),
+    db.from("profiles").select("*").order("name", { ascending: true }),
+  ]);
+
+  const sheets = await fetchAllTimesheets(first, last);
+
+  container.innerHTML = "";
+  if (tErr || aErr || mErr) {
+    container.innerHTML = `<p class="hint">Failed to load manager teams.</p>`;
+    return;
+  }
+
+  const chatters = realMembers(members).filter((m) => !isNonChatter(m));
+
+  // net sales per chatter for the month
+  const netByUser = {};
+  (sheets || []).forEach((r) => {
+    const m = chatters.find((x) => x.id === r.user_id);
+    if (!m) return;
+    netByUser[r.user_id] = (netByUser[r.user_id] || 0) + calcRow(r, m).total;
+  });
+
+  // which team each chatter is on
+  const teamOfUser = {};
+  (assignments || []).forEach((a) => { teamOfUser[a.user_id] = a.team_id; });
+
+  if (!mgrTeams || !mgrTeams.length) {
+    container.innerHTML = `<p class="hint">No manager teams yet — create one above.</p>`;
+    return;
+  }
+
+  mgrTeams.forEach((team) => {
+    const memberIds = (assignments || []).filter((a) => a.team_id === team.id).map((a) => a.user_id);
+    const teamNet = memberIds.reduce((sum, uid) => sum + (netByUser[uid] || 0), 0);
+    const isOpen = mgrExpanded.has(team.id);
+
+    const section = document.createElement("section");
+    section.className = "panel team-card";
+    section.dataset.mgrTeam = team.id;
+    section.innerHTML = `
+      <button class="team-row" data-mgr-toggle type="button">
+        <span class="team-row-name">${team.name}${team.is_floater ? ` <span class="floater-badge">FLOATER</span>` : ""}</span>
+        <span class="team-row-meta">${memberIds.length} chatter${memberIds.length === 1 ? "" : "s"}</span>
+        <span class="team-row-summary"><strong class="mgr-net">${fmt(teamNet)}</strong> net this month</span>
+        <span class="team-chevron${isOpen ? " open" : ""}">▾</span>
+      </button>
+      <div class="team-detail${isOpen ? "" : " hidden"}">
+        <div class="team-head">
+          <input class="team-name-input" data-mgr-field="name" value="${team.name}" title="Team name">
+          <span class="spacer"></span>
+          <button class="btn btn-danger btn-small" data-del-mgr type="button">Delete team</button>
+        </div>
+        <p class="hint">Tick a chatter to add them to this team. A chatter can only be on one team — ticking here moves them off any other team.</p>
+        <div class="member-chips">
+          ${chatters.map((m) => {
+            const here = teamOfUser[m.id] === team.id;
+            const elsewhere = teamOfUser[m.id] && teamOfUser[m.id] !== team.id;
+            const otherName = elsewhere ? (mgrTeams.find((t) => t.id === teamOfUser[m.id]) || {}).name : "";
+            return `
+              <label class="member-chip${here ? " in-team" : ""}" title="${elsewhere ? "Currently on " + otherName : ""}">
+                <input type="checkbox" class="mgr-chip-check" data-mgr-user="${m.id}" ${here ? "checked" : ""}>
+                ${m.name || m.email}${elsewhere ? ` <span class="chip-elsewhere">· ${otherName}</span>` : ""}
+              </label>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+    container.appendChild(section);
+  });
+}
+
+// manager team: expand/collapse + delete
+$("mgr-teams-container").addEventListener("click", async (e) => {
+  const toggle = e.target.closest("[data-mgr-toggle]");
+  if (toggle) {
+    const card = toggle.closest("[data-mgr-team]");
+    const id = card.dataset.mgrTeam;
+    const detail = card.querySelector(".team-detail");
+    const chevron = card.querySelector(".team-chevron");
+    const open = detail.classList.contains("hidden");
+    detail.classList.toggle("hidden", !open);
+    chevron.classList.toggle("open", open);
+    if (open) mgrExpanded.add(id); else mgrExpanded.delete(id);
+    return;
+  }
+  const del = e.target.closest("[data-del-mgr]");
+  if (del) {
+    const card = del.closest("[data-mgr-team]");
+    if (!confirm("Delete this manager team? Chatters will become unassigned.")) return;
+    const { error } = await db.from("manager_teams").delete().eq("id", card.dataset.mgrTeam);
+    if (error) { toast("Could not delete: " + error.message, true); return; }
+    mgrExpanded.delete(card.dataset.mgrTeam);
+    toast("Team deleted");
+    renderManagerTeams();
+  }
+});
+
+// manager team: assign/move chatter (exclusive)
+$("mgr-teams-container").addEventListener("change", async (e) => {
+  const check = e.target;
+  if (!check.classList.contains("mgr-chip-check")) return;
+  const card = check.closest("[data-mgr-team]");
+  const teamId = card.dataset.mgrTeam;
+  const userId = check.dataset.mgrUser;
+
+  if (check.checked) {
+    // upsert on user_id (unique) moves them from any other team to this one
+    const { error } = await db.from("manager_team_members")
+      .upsert({ team_id: teamId, user_id: userId }, { onConflict: "user_id" });
+    if (error) { check.checked = false; toast("Could not assign: " + error.message, true); return; }
+    toast("Chatter assigned ✓");
+  } else {
+    const { error } = await db.from("manager_team_members")
+      .delete().eq("user_id", userId).eq("team_id", teamId);
+    if (error) { check.checked = true; toast("Could not remove: " + error.message, true); return; }
+    toast("Chatter removed");
+  }
+  renderManagerTeams();
+});
+
+// manager team: rename (debounced)
+let mgrNameTimers = {};
+$("mgr-teams-container").addEventListener("input", (e) => {
+  const input = e.target;
+  if (input.dataset.mgrField !== "name") return;
+  const card = input.closest("[data-mgr-team]");
+  const id = card.dataset.mgrTeam;
+  clearTimeout(mgrNameTimers[id]);
+  mgrNameTimers[id] = setTimeout(async () => {
+    const { error } = await db.from("manager_teams").update({ name: input.value.trim() }).eq("id", id);
+    if (error) { toast("Rename failed: " + error.message, true); return; }
+    toast("Team renamed");
+  }, 700);
+});
 $("teams-container").addEventListener("input", (e) => {
   const input = e.target;
   if (!input.dataset.tfield) return;
