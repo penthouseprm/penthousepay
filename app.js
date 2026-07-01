@@ -1456,16 +1456,17 @@ async function renderManagerTeams() {
     const isOpen = mgrExpanded.has(team.id);
 
     const section = document.createElement("section");
-    section.className = "panel team-card";
+    section.className = "panel team-card mgr-card";
     section.dataset.mgrTeam = team.id;
     section.innerHTML = `
       <button class="team-row" data-mgr-toggle type="button">
         <span class="team-row-name">${team.name}${team.is_floater ? ` <span class="floater-badge">FLOATER</span>` : ""}</span>
         <span class="team-row-meta">${memberIds.length} chatter${memberIds.length === 1 ? "" : "s"}</span>
         <span class="team-row-summary"><strong class="mgr-net">${fmt(teamNet)}</strong> net this month</span>
+        <span class="mgr-breakdown-spacer"></span>
         <span class="team-chevron${isOpen ? " open" : ""}">▾</span>
-        <button class="net-breakdown-btn" type="button" data-mgr-breakdown="${team.id}" title="Platform breakdown">▦</button>
       </button>
+      <button class="net-breakdown-btn mgr-breakdown-btn" type="button" data-mgr-breakdown="${team.id}" title="Platform breakdown">▦</button>
       <div class="team-detail${isOpen ? "" : " hidden"}">
         <p class="hint">Tick a chatter to add them to this team. Chatters already on another team aren't shown here.</p>
         <div class="member-chips">

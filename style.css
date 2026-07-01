@@ -1045,3 +1045,13 @@ input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
 }
 .mgr-net { color: var(--c-fv); }
 .chip-elsewhere { color: var(--text-dim); font-size: 11px; font-weight: 400; }
+
+/* ════════════ UPDATE 33: mgr breakdown icon on the right ════════════ */
+.mgr-card { position: relative; }
+.mgr-breakdown-btn {
+  position: absolute;
+  top: 18px;
+  right: 46px;   /* sits just left of the chevron */
+  z-index: 2;
+}
+.mgr-breakdown-spacer { width: 26px; }  /* reserve room in the row so text doesn't collide */
