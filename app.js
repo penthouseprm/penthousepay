@@ -1248,6 +1248,17 @@ async function renderTeamSales() {
   const monthIdx = teamMonth.getMonth();
   const lastDay = daysInMonth(teamMonth);
 
+  // pre-index sheets: date → userId → net total (robust to date/timestamp formats)
+  const netByDateUser = {};
+  (sheets || []).forEach((r) => {
+    const dateKey = String(r.entry_date).slice(0, 10); // normalise "2026-06-17T..." → "2026-06-17"
+    const m = membersCache.find((x) => x.id === r.user_id);
+    if (!m) return;
+    (netByDateUser[dateKey] = netByDateUser[dateKey] || {});
+    netByDateUser[dateKey][r.user_id] =
+      (netByDateUser[dateKey][r.user_id] || 0) + calcRow(r, m).total;
+  });
+
   teams.forEach((team) => {
     const memberIds = (teamMembers || [])
       .filter((tm) => tm.team_id === team.id)
@@ -1264,12 +1275,10 @@ async function renderTeamSales() {
       const label = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
 
       let dayNet = 0;
-      (sheets || []).forEach((r) => {
-        if (r.entry_date !== date || !memberIds.includes(r.user_id)) return;
-        const m = membersCache.find((x) => x.id === r.user_id);
-        if (!m) return;
-        dayNet += calcRow(r, m).total;
-      });
+      const dayMap = netByDateUser[date];
+      if (dayMap) {
+        memberIds.forEach((uid) => { dayNet += dayMap[uid] || 0; });
+      }
 
       let statusHtml = `<span class="ts-status future">—</span>`;
       if (!isFuture) {
