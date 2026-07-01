@@ -1450,19 +1450,19 @@ async function renderManagerTeams() {
         <span class="team-chevron${isOpen ? " open" : ""}">▾</span>
       </button>
       <div class="team-detail${isOpen ? "" : " hidden"}">
-        <p class="hint">Tick a chatter to add them to this team. A chatter can only be on one team — ticking here moves them off any other team.</p>
+        <p class="hint">Tick a chatter to add them to this team. Chatters already on another team aren't shown here.</p>
         <div class="member-chips">
-          ${chatters.map((m) => {
-            const here = teamOfUser[m.id] === team.id;
-            const elsewhere = teamOfUser[m.id] && teamOfUser[m.id] !== team.id;
-            const otherName = elsewhere ? (mgrTeams.find((t) => t.id === teamOfUser[m.id]) || {}).name : "";
-            return `
-              <label class="member-chip${here ? " in-team" : ""}" title="${elsewhere ? "Currently on " + otherName : ""}">
-                <input type="checkbox" class="mgr-chip-check" data-mgr-user="${m.id}" ${here ? "checked" : ""}>
-                ${m.name || m.email}${elsewhere ? ` <span class="chip-elsewhere">· ${otherName}</span>` : ""}
-              </label>
-            `;
-          }).join("")}
+          ${chatters
+            .filter((m) => !teamOfUser[m.id] || teamOfUser[m.id] === team.id)
+            .map((m) => {
+              const here = teamOfUser[m.id] === team.id;
+              return `
+                <label class="member-chip${here ? " in-team" : ""}">
+                  <input type="checkbox" class="mgr-chip-check" data-mgr-user="${m.id}" ${here ? "checked" : ""}>
+                  ${m.name || m.email}
+                </label>
+              `;
+            }).join("") || `<span class="hint">No unassigned chatters available.</span>`}
         </div>
       </div>
     `;
