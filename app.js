@@ -1422,6 +1422,7 @@ async function renderManagerTeams() {
   const mgrTeams = (mgrTeamsRaw || []).slice().sort((a, b) => orderIdx(a.name) - orderIdx(b.name));
 
   const chatters = realMembers(members).filter((m) => !isNonChatter(m));
+  const admins = realMembers(members).filter((m) => m.role === "admin");
 
   // net sales per chatter for the month (total + per-platform)
   const netByUser = {};
@@ -1468,6 +1469,16 @@ async function renderManagerTeams() {
       </button>
       <button class="net-breakdown-btn mgr-breakdown-btn" type="button" data-mgr-breakdown="${team.id}" title="Platform breakdown">▦</button>
       <div class="team-detail${isOpen ? "" : " hidden"}">
+        <div class="mgr-manager-row">
+          <label class="team-target-label" style="flex-direction: row; align-items: center; gap: 8px;">
+            Managed by
+            <select class="mgr-manager-select" data-mgr-team-select="${team.id}">
+              <option value="">— none —</option>
+              ${admins.map((a) => `<option value="${a.id}" ${team.manager_id === a.id ? "selected" : ""}>${a.name || a.email}</option>`).join("")}
+            </select>
+          </label>
+          <span class="hint">This manager earns 1% of the team's net sales.</span>
+        </div>
         <p class="hint">Tick a chatter to add them to this team. Chatters already on another team aren't shown here.</p>
         <div class="member-chips">
           ${chatters
@@ -1532,6 +1543,17 @@ $("mgr-teams-container").addEventListener("click", (e) => {
 
 // manager team: assign/move chatter (exclusive)
 $("mgr-teams-container").addEventListener("change", async (e) => {
+  // set which admin manages this team
+  const sel = e.target.closest("[data-mgr-team-select]");
+  if (sel) {
+    const teamId = sel.dataset.mgrTeamSelect;
+    const managerId = sel.value || null;
+    const { error } = await db.from("manager_teams").update({ manager_id: managerId }).eq("id", teamId);
+    if (error) { toast("Could not set manager: " + error.message, true); return; }
+    toast(managerId ? "Manager assigned ✓" : "Manager cleared");
+    return;
+  }
+
   const check = e.target;
   if (!check.classList.contains("mgr-chip-check")) return;
   const card = check.closest("[data-mgr-team]");
@@ -2581,6 +2603,12 @@ async function renderPayroll() {
   // timesheets fetched separately with pagination (can exceed 1000 rows/month)
   const sheets = await fetchAllTimesheets(first, last);
 
+  // manager teams for the Managers section (1% of team net)
+  const [{ data: mgrTeams }, { data: mgrAssigns }] = await Promise.all([
+    db.from("manager_teams").select("*"),
+    db.from("manager_team_members").select("*"),
+  ]);
+
   const body = $("payroll-body");
   body.innerHTML = "";
 
@@ -2590,11 +2618,60 @@ async function renderPayroll() {
   }
   membersCache = realMembers(members);
 
+  // per-chatter platform net for the month, then per-team, then per-manager
+  const platByUser = {};
+  (sheets || []).forEach((r) => {
+    const cm = membersCache.find((x) => x.id === r.user_id);
+    if (!cm || isNonChatter(cm)) return;
+    const c = calcRow(r, cm);
+    const p = platByUser[r.user_id] || (platByUser[r.user_id] = { of: 0, fv: 0, fansly: 0, slushy: 0 });
+    p.of += c.ofNet; p.fv += c.fvNet; p.fansly += c.fanslyNet; p.slushy += c.slushyNet;
+  });
+  // manager_id → summed OWN team platform net (excludes floaters)
+  const mgrTeamNet = {};
+  const floaterNet = { of: 0, fv: 0, fansly: 0, slushy: 0 };
+  (mgrTeams || []).forEach((t) => {
+    if (t.is_floater) {
+      (mgrAssigns || []).filter((a) => a.team_id === t.id).forEach((a) => {
+        const p = platByUser[a.user_id];
+        if (p) { floaterNet.of += p.of; floaterNet.fv += p.fv; floaterNet.fansly += p.fansly; floaterNet.slushy += p.slushy; }
+      });
+      return;
+    }
+    if (!t.manager_id) return;
+    // ensure an entry exists for any team that has a manager (even if empty)
+    const acc = mgrTeamNet[t.manager_id] || (mgrTeamNet[t.manager_id] = { of: 0, fv: 0, fansly: 0, slushy: 0 });
+    (mgrAssigns || []).filter((a) => a.team_id === t.id).forEach((a) => {
+      const p = platByUser[a.user_id];
+      if (p) { acc.of += p.of; acc.fv += p.fv; acc.fansly += p.fansly; acc.slushy += p.slushy; }
+    });
+  });
+
+  // the floaters' net is split evenly across all managers who run a team
+  const managerIdsWithTeam = Object.keys(mgrTeamNet);
+  const shareCount = managerIdsWithTeam.length || 1;
+  const floaterShare = {
+    of: floaterNet.of / shareCount,
+    fv: floaterNet.fv / shareCount,
+    fansly: floaterNet.fansly / shareCount,
+    slushy: floaterNet.slushy / shareCount,
+  };
+  managerIdsWithTeam.forEach((mid) => {
+    mgrTeamNet[mid].of += floaterShare.of;
+    mgrTeamNet[mid].fv += floaterShare.fv;
+    mgrTeamNet[mid].fansly += floaterShare.fansly;
+    mgrTeamNet[mid].slushy += floaterShare.slushy;
+  });
+  managerPayrollBreakdowns = {};
+
   const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, bonus: 0, ot: 0, fines: 0, on15: 0, on1: 0, total: 0,
                   ofNet: 0, fvNet: 0, slushyNet: 0, fanslyNet: 0 };
   const ncGrand = { h1Hours: 0, h2Hours: 0, on15: 0, on1: 0, total: 0 };
   const ncBody = $("payroll-nc-body");
   ncBody.innerHTML = "";
+  const mgrGrand = { h1Hours: 0, h2Hours: 0, teamNet: 0, comm: 0, on15: 0, on1: 0, total: 0 };
+  const mgrBody = $("payroll-mgr-body");
+  mgrBody.innerHTML = "";
 
   membersCache.forEach((m) => {
     if (isSuperAdmin(m)) return; // super admin is not an employee — excluded from payroll
@@ -2628,6 +2705,56 @@ async function renderPayroll() {
 
     const paid15 = (pays || []).some((p) => p.user_id === m.id && p.period === pay15Key);
     const paid1 = (pays || []).some((p) => p.user_id === m.id && p.period === pay1Key);
+
+    // ── MANAGERS: admins with 1% team commission ──
+    if (m.role === "admin") {
+      const plat = mgrTeamNet[m.id] || { of: 0, fv: 0, fansly: 0, slushy: 0 };
+      const teamNet = plat.of + plat.fv + plat.fansly + plat.slushy;
+      const mgrComm = teamNet * 0.01;
+      managerPayrollBreakdowns[m.id] = {
+        of: plat.of * 0.01, fv: plat.fv * 0.01, fansly: plat.fansly * 0.01, slushy: plat.slushy * 0.01, total: mgrComm,
+      };
+
+      let payOn15 = h1Pay;
+      let payOn1 = h2Pay + mgrComm;
+      if (m.fired && !paid15) { payOn15 = h1Pay + h2Pay + mgrComm; payOn1 = 0; }
+      const monthTotal = payOn15 + payOn1;
+
+      mgrGrand.h1Hours += h1Hours;
+      mgrGrand.h2Hours += h2Hours;
+      mgrGrand.teamNet += teamNet;
+      mgrGrand.comm += mgrComm;
+      mgrGrand.on15 += payOn15;
+      mgrGrand.on1 += payOn1;
+      mgrGrand.total += monthTotal;
+
+      const firedBadge = m.fired ? ` <span class="fired-badge" title="Fired — full pay due next payday">FIRED</span>` : "";
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><button class="member-link" data-view-member="${m.id}" type="button">${m.name || m.email}</button>${firedBadge}</td>
+        <td>${badge(h1Sub, "1st half")} ${badge(h2Sub, "2nd half")}</td>
+        <td class="col-num">${h1Hours}</td>
+        <td class="col-num">${h2Hours}</td>
+        <td class="col-num net-fv">${fmt(teamNet)}</td>
+        <td class="col-num cell-grey">${fmt(mgrComm)} <button class="net-breakdown-btn" type="button" data-mgr-comm-breakdown="${m.id}" title="Commission by platform">▦</button></td>
+        <td class="col-num cell-payout${paid15 ? " paid" : ""}">
+          <div class="paid-wrap">
+            <span class="pay-amount"><strong>${fmt(payOn15)}</strong></span>
+            <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay15Key}" ${paid15 ? "checked" : ""}>
+          </div>
+        </td>
+        <td class="col-num cell-payout${paid1 ? " paid" : ""}">
+          <div class="paid-wrap">
+            <span class="pay-amount"><strong>${fmt(payOn1)}</strong></span>
+            <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay1Key}" ${paid1 ? "checked" : ""}>
+          </div>
+        </td>
+        <td class="col-num"><strong>${fmt(monthTotal)}</strong></td>
+      `;
+      mgrBody.appendChild(tr);
+      return;
+    }
 
     // ── NON-CHATTERS: hourly only ──
     if (isNonChatter(m)) {
@@ -2768,6 +2895,20 @@ async function renderPayroll() {
     </tr>
   `;
 
+  $("payroll-mgr-foot").innerHTML = `
+    <tr>
+      <td>ALL MANAGERS</td>
+      <td></td>
+      <td class="col-num">${mgrGrand.h1Hours}</td>
+      <td class="col-num">${mgrGrand.h2Hours}</td>
+      <td class="col-num net-fv">${fmt(mgrGrand.teamNet)}</td>
+      <td class="col-num cell-grey">${fmt(mgrGrand.comm)}</td>
+      <td class="col-num cell-payout"><strong>${fmt(mgrGrand.on15)}</strong></td>
+      <td class="col-num cell-payout"><strong>${fmt(mgrGrand.on1)}</strong></td>
+      <td class="col-num"><strong>${fmt(mgrGrand.total)}</strong></td>
+    </tr>
+  `;
+
   // stash the platform breakdown for the popover
   payrollNetBreakdown = {
     of: grand.ofNet,
@@ -2779,6 +2920,7 @@ async function renderPayroll() {
 }
 
 let payrollNetBreakdown = null;
+let managerPayrollBreakdowns = {};
 
 // net sales platform breakdown popover (fixed overlay so the table doesn't clip it)
 $("payroll-foot").addEventListener("click", (e) => {
@@ -2812,7 +2954,7 @@ $("payroll-foot").addEventListener("click", (e) => {
   pop.style.top = top + "px";
 });
 document.addEventListener("click", (e) => {
-  if (!e.target.closest("[data-net-breakdown]") && !e.target.closest("[data-mgr-breakdown]") && !e.target.closest(".net-popover")) {
+  if (!e.target.closest("[data-net-breakdown]") && !e.target.closest("[data-mgr-breakdown]") && !e.target.closest("[data-mgr-comm-breakdown]") && !e.target.closest(".net-popover")) {
     document.querySelectorAll(".net-popover").forEach((p) => p.remove());
   }
 });
@@ -2887,6 +3029,37 @@ async function handleMemberLinkClick(e) {
 }
 $("payroll-body").addEventListener("click", handleMemberLinkClick);
 $("payroll-nc-body").addEventListener("click", handleMemberLinkClick);
+$("payroll-mgr-body").addEventListener("click", handlePayAmountClick);
+$("payroll-mgr-body").addEventListener("change", handlePaidToggle);
+$("payroll-mgr-body").addEventListener("click", handleMemberLinkClick);
+
+// manager commission platform breakdown popover
+$("payroll-mgr-body").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-mgr-comm-breakdown]");
+  document.querySelectorAll(".net-popover").forEach((p) => p.remove());
+  if (!btn) return;
+  const b = managerPayrollBreakdowns[btn.dataset.mgrCommBreakdown];
+  if (!b) return;
+  e.stopPropagation();
+  const pop = document.createElement("div");
+  pop.className = "net-popover";
+  pop.innerHTML = `
+    <div class="net-popover-title">Manager Comm by Platform (1%)</div>
+    <div class="net-popover-row"><span class="np-of">OnlyFans</span><span>${fmt(b.of)}</span></div>
+    <div class="net-popover-row"><span class="np-fv">FV</span><span>${fmt(b.fv)}</span></div>
+    <div class="net-popover-row"><span class="np-fansly">Fansly</span><span>${fmt(b.fansly)}</span></div>
+    <div class="net-popover-row"><span class="np-slushy">Slushy</span><span>${fmt(b.slushy)}</span></div>
+    <div class="net-popover-row net-popover-total"><span>Total</span><span>${fmt(b.total)}</span></div>
+  `;
+  document.body.appendChild(pop);
+  const r = btn.getBoundingClientRect();
+  let left = r.right - pop.offsetWidth;
+  let top = r.bottom + 6;
+  if (left < 8) left = 8;
+  if (top + pop.offsetHeight > window.innerHeight - 8) top = r.top - pop.offsetHeight - 6;
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+});
 
 // ── Boot ────────────────────────────────────────────────────
 init();
