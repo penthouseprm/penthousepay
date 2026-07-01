@@ -1462,8 +1462,9 @@ async function renderManagerTeams() {
       <button class="team-row" data-mgr-toggle type="button">
         <span class="team-row-name">${team.name}${team.is_floater ? ` <span class="floater-badge">FLOATER</span>` : ""}</span>
         <span class="team-row-meta">${memberIds.length} chatter${memberIds.length === 1 ? "" : "s"}</span>
-        <span class="team-row-summary"><strong class="mgr-net">${fmt(teamNet)}</strong> net this month <button class="net-breakdown-btn" type="button" data-mgr-breakdown="${team.id}" title="Platform breakdown">▦</button></span>
+        <span class="team-row-summary"><strong class="mgr-net">${fmt(teamNet)}</strong> net this month</span>
         <span class="team-chevron${isOpen ? " open" : ""}">▾</span>
+        <button class="net-breakdown-btn" type="button" data-mgr-breakdown="${team.id}" title="Platform breakdown">▦</button>
       </button>
       <div class="team-detail${isOpen ? "" : " hidden"}">
         <p class="hint">Tick a chatter to add them to this team. Chatters already on another team aren't shown here.</p>
