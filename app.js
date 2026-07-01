@@ -1361,6 +1361,14 @@ async function renderTeamSales() {
 // ════════════════════════════════════════════════════════════
 let mgrExpanded = new Set();
 
+// the 4 fixed manager teams, in display order
+const FIXED_MGR_TEAMS = [
+  { name: "Team Kim", is_floater: false },
+  { name: "Team Macky", is_floater: false },
+  { name: "Team Janus", is_floater: false },
+  { name: "Floaters", is_floater: true },
+];
+
 $("mgr-toggle").addEventListener("click", () => {
   const detail = $("mgr-detail");
   const chevron = $("mgr-chevron");
@@ -1370,36 +1378,29 @@ $("mgr-toggle").addEventListener("click", () => {
   if (open) renderManagerTeams();
 });
 
-$("btn-create-mgr").addEventListener("click", async () => {
-  const name = $("new-mgr-name").value.trim();
-  const isFloater = $("new-mgr-floater").checked;
-  if (!name) { toast("Enter a team name.", true); return; }
-
-  const { data: created, error } = await db
-    .from("manager_teams")
-    .insert({ name, is_floater: isFloater })
-    .select()
-    .single();
-  if (error || !created) { toast("Could not create team: " + (error ? error.message : "error"), true); return; }
-
-  $("new-mgr-name").value = "";
-  $("new-mgr-floater").checked = false;
-  mgrExpanded.add(created.id);
-  toast("Manager team created ✓");
-  renderManagerTeams();
-});
+// makes sure the 4 fixed teams exist (creates any that are missing)
+async function ensureFixedMgrTeams() {
+  const { data: existing } = await db.from("manager_teams").select("*");
+  const names = new Set((existing || []).map((t) => t.name));
+  const missing = FIXED_MGR_TEAMS.filter((t) => !names.has(t.name));
+  if (missing.length) {
+    await db.from("manager_teams").insert(missing);
+  }
+}
 
 async function renderManagerTeams() {
   const container = $("mgr-teams-container");
   if (!container) return;
 
+  await ensureFixedMgrTeams();
+
   const { first, last } = monthRange(teamMonth);
   const [
-    { data: mgrTeams, error: tErr },
+    { data: mgrTeamsRaw, error: tErr },
     { data: assignments, error: aErr },
     { data: members, error: mErr },
   ] = await Promise.all([
-    db.from("manager_teams").select("*").order("is_floater", { ascending: true }).order("created_at", { ascending: true }),
+    db.from("manager_teams").select("*"),
     db.from("manager_team_members").select("*"),
     db.from("profiles").select("*").order("name", { ascending: true }),
   ]);
@@ -1411,6 +1412,13 @@ async function renderManagerTeams() {
     container.innerHTML = `<p class="hint">Failed to load manager teams.</p>`;
     return;
   }
+
+  // order teams by the fixed list
+  const orderIdx = (name) => {
+    const i = FIXED_MGR_TEAMS.findIndex((t) => t.name === name);
+    return i === -1 ? 99 : i;
+  };
+  const mgrTeams = (mgrTeamsRaw || []).slice().sort((a, b) => orderIdx(a.name) - orderIdx(b.name));
 
   const chatters = realMembers(members).filter((m) => !isNonChatter(m));
 
@@ -1425,11 +1433,6 @@ async function renderManagerTeams() {
   // which team each chatter is on
   const teamOfUser = {};
   (assignments || []).forEach((a) => { teamOfUser[a.user_id] = a.team_id; });
-
-  if (!mgrTeams || !mgrTeams.length) {
-    container.innerHTML = `<p class="hint">No manager teams yet — create one above.</p>`;
-    return;
-  }
 
   mgrTeams.forEach((team) => {
     const memberIds = (assignments || []).filter((a) => a.team_id === team.id).map((a) => a.user_id);
@@ -1447,11 +1450,6 @@ async function renderManagerTeams() {
         <span class="team-chevron${isOpen ? " open" : ""}">▾</span>
       </button>
       <div class="team-detail${isOpen ? "" : " hidden"}">
-        <div class="team-head">
-          <input class="team-name-input" data-mgr-field="name" value="${team.name}" title="Team name">
-          <span class="spacer"></span>
-          <button class="btn btn-danger btn-small" data-del-mgr type="button">Delete team</button>
-        </div>
         <p class="hint">Tick a chatter to add them to this team. A chatter can only be on one team — ticking here moves them off any other team.</p>
         <div class="member-chips">
           ${chatters.map((m) => {
@@ -1472,30 +1470,18 @@ async function renderManagerTeams() {
   });
 }
 
-// manager team: expand/collapse + delete
-$("mgr-teams-container").addEventListener("click", async (e) => {
+// manager team: expand/collapse
+$("mgr-teams-container").addEventListener("click", (e) => {
   const toggle = e.target.closest("[data-mgr-toggle]");
-  if (toggle) {
-    const card = toggle.closest("[data-mgr-team]");
-    const id = card.dataset.mgrTeam;
-    const detail = card.querySelector(".team-detail");
-    const chevron = card.querySelector(".team-chevron");
-    const open = detail.classList.contains("hidden");
-    detail.classList.toggle("hidden", !open);
-    chevron.classList.toggle("open", open);
-    if (open) mgrExpanded.add(id); else mgrExpanded.delete(id);
-    return;
-  }
-  const del = e.target.closest("[data-del-mgr]");
-  if (del) {
-    const card = del.closest("[data-mgr-team]");
-    if (!confirm("Delete this manager team? Chatters will become unassigned.")) return;
-    const { error } = await db.from("manager_teams").delete().eq("id", card.dataset.mgrTeam);
-    if (error) { toast("Could not delete: " + error.message, true); return; }
-    mgrExpanded.delete(card.dataset.mgrTeam);
-    toast("Team deleted");
-    renderManagerTeams();
-  }
+  if (!toggle) return;
+  const card = toggle.closest("[data-mgr-team]");
+  const id = card.dataset.mgrTeam;
+  const detail = card.querySelector(".team-detail");
+  const chevron = card.querySelector(".team-chevron");
+  const open = detail.classList.contains("hidden");
+  detail.classList.toggle("hidden", !open);
+  chevron.classList.toggle("open", open);
+  if (open) mgrExpanded.add(id); else mgrExpanded.delete(id);
 });
 
 // manager team: assign/move chatter (exclusive)
@@ -1519,21 +1505,6 @@ $("mgr-teams-container").addEventListener("change", async (e) => {
     toast("Chatter removed");
   }
   renderManagerTeams();
-});
-
-// manager team: rename (debounced)
-let mgrNameTimers = {};
-$("mgr-teams-container").addEventListener("input", (e) => {
-  const input = e.target;
-  if (input.dataset.mgrField !== "name") return;
-  const card = input.closest("[data-mgr-team]");
-  const id = card.dataset.mgrTeam;
-  clearTimeout(mgrNameTimers[id]);
-  mgrNameTimers[id] = setTimeout(async () => {
-    const { error } = await db.from("manager_teams").update({ name: input.value.trim() }).eq("id", id);
-    if (error) { toast("Rename failed: " + error.message, true); return; }
-    toast("Team renamed");
-  }, 700);
 });
 $("teams-container").addEventListener("input", (e) => {
   const input = e.target;
