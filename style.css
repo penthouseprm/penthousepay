@@ -1055,3 +1055,12 @@ input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
   z-index: 2;
 }
 .mgr-breakdown-spacer { width: 26px; }  /* reserve room in the row so text doesn't collide */
+
+/* ════════════ UPDATE 34: managers payroll + managed-by ════════════ */
+.mgr-manager-row {
+  display: flex; align-items: center; gap: 14px;
+  flex-wrap: wrap; margin-bottom: 14px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--border);
+}
+.mgr-manager-select { min-width: 170px; }
+#payroll-mgr-body tr:hover td { background: var(--accent-soft); }
