@@ -394,6 +394,29 @@ async function loadMonthRows(userId, monthDate) {
   return map;
 }
 
+// Fetches ALL timesheet rows across ALL members for a date range, paging past
+// Supabase's default 1000-row cap. Without this, a full month across many
+// chatters silently drops rows and undercounts payroll / team-sales totals.
+async function fetchAllTimesheets(first, last) {
+  const all = [];
+  const pageSize = 1000;
+  let from = 0;
+  while (true) {
+    const { data, error } = await db
+      .from("timesheets")
+      .select("*")
+      .gte("entry_date", first)
+      .lte("entry_date", last)
+      .order("entry_date", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) { toast("Failed to load timesheets: " + error.message, true); break; }
+    all.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 // returns { 'YYYY-MM-H1': submitted_at, 'YYYY-MM-H2': submitted_at }
 async function loadSubmissions(userId, monthDate) {
   const keys = [periodKey(monthDate, 1), periodKey(monthDate, 2)];
@@ -1190,18 +1213,19 @@ async function renderTeamSales() {
     { data: teams, error: tErr },
     { data: teamMembers, error: tmErr },
     { data: members, error: mErr },
-    { data: sheets, error: sErr },
   ] = await Promise.all([
     db.from("teams").select("*").order("created_at", { ascending: true }),
     db.from("team_members").select("*"),
     db.from("profiles").select("*").order("name", { ascending: true }),
-    db.from("timesheets").select("*").gte("entry_date", first).lte("entry_date", last),
   ]);
+
+  // timesheets fetched separately with pagination (can exceed 1000 rows/month)
+  const sheets = await fetchAllTimesheets(first, last);
 
   const container = $("teams-container");
   container.innerHTML = "";
 
-  if (tErr || tmErr || mErr || sErr) {
+  if (tErr || tmErr || mErr) {
     container.innerHTML = `<p class="hint">Failed to load team sales data.</p>`;
     return;
   }
@@ -2335,7 +2359,6 @@ async function renderPayroll() {
 
   const [
     { data: members, error: memErr },
-    { data: sheets, error: shErr },
     { data: subs, error: subErr },
     { data: pays, error: payErr },
     { data: monthBonuses, error: bonusErr },
@@ -2343,7 +2366,6 @@ async function renderPayroll() {
     { data: monthOT, error: otErr },
   ] = await Promise.all([
     db.from("profiles").select("*").order("name", { ascending: true }),
-    db.from("timesheets").select("*").gte("entry_date", first).lte("entry_date", last),
     db.from("submissions").select("*").in("period", pKeys),
     db.from("payments").select("*").in("period", [pay15Key, pay1Key]),
     db.from("bonuses").select("*").eq("month", bonusMonthKey(payMonth)),
@@ -2351,10 +2373,13 @@ async function renderPayroll() {
     db.from("overtime_requests").select("*").eq("status", "approved").gte("ot_date", first).lte("ot_date", last),
   ]);
 
+  // timesheets fetched separately with pagination (can exceed 1000 rows/month)
+  const sheets = await fetchAllTimesheets(first, last);
+
   const body = $("payroll-body");
   body.innerHTML = "";
 
-  if (memErr || shErr || subErr || payErr || bonusErr || fineErr || otErr) {
+  if (memErr || subErr || payErr || bonusErr || fineErr || otErr) {
     body.innerHTML = `<tr><td colspan="12">Failed to load payroll data.</td></tr>`;
     return;
   }
