@@ -1064,3 +1064,15 @@ input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
 }
 .mgr-manager-select { min-width: 170px; }
 #payroll-mgr-body tr:hover td { background: var(--accent-soft); }
+
+/* ════════════ UPDATE 36: unsubmit from payroll ════════════ */
+button.sub-badge.unsub {
+  cursor: pointer;
+  border: none;
+  padding: 0;
+  position: relative;
+}
+.sub-badge .sub-redo { display: none; }
+button.sub-badge.unsub:hover { background: rgba(240,122,122,0.16); color: var(--c-total); }
+button.sub-badge.unsub:hover .sub-tick { display: none; }
+button.sub-badge.unsub:hover .sub-redo { display: inline; }

@@ -2710,8 +2710,10 @@ async function renderPayroll() {
 
     const h1Sub = (subs || []).some((s) => s.user_id === m.id && s.period === pKeys[0]);
     const h2Sub = (subs || []).some((s) => s.user_id === m.id && s.period === pKeys[1]);
-    const badge = (ok, label) =>
-      `<span class="sub-badge ${ok ? "ok" : ""}" title="${label}">${ok ? "✓" : "–"}</span>`;
+    const badge = (ok, label, period) =>
+      ok
+        ? `<button class="sub-badge ok unsub" data-unsubmit-user="${m.id}" data-unsubmit-period="${period}" title="${label} submitted — click to unsubmit"><span class="sub-tick">✓</span><span class="sub-redo">↺</span></button>`
+        : `<span class="sub-badge" title="${label} not submitted">–</span>`;
 
     const paid15 = (pays || []).some((p) => p.user_id === m.id && p.period === pay15Key);
     const paid1 = (pays || []).some((p) => p.user_id === m.id && p.period === pay1Key);
@@ -2743,7 +2745,7 @@ async function renderPayroll() {
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td><button class="member-link" data-view-member="${m.id}" type="button">${m.name || m.email}</button>${firedBadge}</td>
-        <td>${badge(h1Sub, "1st half")} ${badge(h2Sub, "2nd half")}</td>
+        <td>${badge(h1Sub, "1st half", pKeys[0])} ${badge(h2Sub, "2nd half", pKeys[1])}</td>
         <td class="col-num">${h1Hours}</td>
         <td class="col-num">${h2Hours}</td>
         <td class="col-num net-fv">${fmt(teamNet)}</td>
@@ -2789,7 +2791,7 @@ async function renderPayroll() {
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td><button class="member-link" data-view-member="${m.id}" type="button">${m.name || m.email}</button>${firedBadge}</td>
-        <td>${badge(h1Sub, "1st half")} ${badge(h2Sub, "2nd half")}</td>
+        <td>${badge(h1Sub, "1st half", pKeys[0])} ${badge(h2Sub, "2nd half", pKeys[1])}</td>
         <td class="col-num">${h1Hours}</td>
         <td class="col-num">${h2Hours}</td>
         <td class="col-num cell-payout${paid15 ? " paid" : ""}">
@@ -2851,7 +2853,7 @@ async function renderPayroll() {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td><button class="member-link" data-view-member="${m.id}" type="button">${m.name || m.email}</button>${m.fired ? ` <span class="fired-badge" title="Fired — full pay (incl. commission) due next payday">FIRED</span>` : ""}</td>
-      <td>${badge(h1Sub, "1st half")} ${badge(h2Sub, "2nd half")}</td>
+      <td>${badge(h1Sub, "1st half", pKeys[0])} ${badge(h2Sub, "2nd half", pKeys[1])}</td>
       <td class="col-num">${h1Hours}</td>
       <td class="col-num">${h2Hours}</td>
       <td class="col-num net-fv">${fmt(netMonth)}</td>
@@ -3039,6 +3041,28 @@ async function handleMemberLinkClick(e) {
 }
 $("payroll-body").addEventListener("click", handleMemberLinkClick);
 $("payroll-nc-body").addEventListener("click", handleMemberLinkClick);
+
+// unsubmit a chatter's period from payroll (admin acting on their behalf)
+async function handleUnsubmit(e) {
+  const btn = e.target.closest("[data-unsubmit-user]");
+  if (!btn) return;
+  e.stopPropagation();
+
+  const userId = btn.dataset.unsubmitUser;
+  const period = btn.dataset.unsubmitPeriod;
+  if (!confirm("Unsubmit this timesheet period? The chatter will be able to edit it again until they re-submit.")) return;
+
+  const { error } = await db.from("submissions")
+    .delete()
+    .eq("user_id", userId)
+    .eq("period", period);
+  if (error) { toast("Could not unsubmit: " + error.message, true); return; }
+  toast("Period unsubmitted — chatter can edit again");
+  renderPayroll();
+}
+$("payroll-body").addEventListener("click", handleUnsubmit);
+$("payroll-nc-body").addEventListener("click", handleUnsubmit);
+$("payroll-mgr-body").addEventListener("click", handleUnsubmit);
 $("payroll-mgr-body").addEventListener("click", handlePayAmountClick);
 $("payroll-mgr-body").addEventListener("change", handlePaidToggle);
 $("payroll-mgr-body").addEventListener("click", handleMemberLinkClick);
