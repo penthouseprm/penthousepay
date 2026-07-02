@@ -1370,6 +1370,25 @@ const FIXED_MGR_TEAMS = [
   { name: "Floaters", is_floater: true },
 ];
 
+// hardcoded team → manager. Each team is run by the admin whose name/email
+// matches one of these fragments (case-insensitive). Floaters has no single
+// manager (its net is split across all managers).
+const TEAM_MANAGER_MATCH = {
+  "Team Kim": ["kim", "kcabarse"],
+  "Team Macky": ["macky", "mackey", "mackeyckey"],
+  "Team Janus": ["janji", "janus", "janusmanligoy"],
+};
+
+// find the admin who manages a given team name
+function resolveTeamManager(teamName, admins) {
+  const frags = TEAM_MANAGER_MATCH[teamName];
+  if (!frags) return null;
+  return admins.find((a) => {
+    const hay = ((a.name || "") + " " + (a.email || "")).toLowerCase();
+    return frags.some((f) => hay.includes(f));
+  }) || null;
+}
+
 $("mgr-toggle").addEventListener("click", () => {
   const detail = $("mgr-detail");
   const chevron = $("mgr-chevron");
@@ -1469,16 +1488,9 @@ async function renderManagerTeams() {
       </button>
       <button class="net-breakdown-btn mgr-breakdown-btn" type="button" data-mgr-breakdown="${team.id}" title="Platform breakdown">▦</button>
       <div class="team-detail${isOpen ? "" : " hidden"}">
-        <div class="mgr-manager-row">
-          <label class="team-target-label" style="flex-direction: row; align-items: center; gap: 8px;">
-            Managed by
-            <select class="mgr-manager-select" data-mgr-team-select="${team.id}">
-              <option value="">— none —</option>
-              ${admins.map((a) => `<option value="${a.id}" ${team.manager_id === a.id ? "selected" : ""}>${a.name || a.email}</option>`).join("")}
-            </select>
-          </label>
-          <span class="hint">This manager earns 1% of the team's net sales.</span>
-        </div>
+        ${team.is_floater
+          ? `<div class="mgr-manager-row"><span class="hint">Floaters' net is split evenly across all three managers.</span></div>`
+          : `<div class="mgr-manager-row"><span class="team-target-label" style="gap:6px;">Managed by <strong style="color:var(--accent)">${(resolveTeamManager(team.name, admins) || {}).name || (resolveTeamManager(team.name, admins) || {}).email || "—"}</strong></span><span class="hint">This manager earns 1% of the team's net sales.</span></div>`}
         <p class="hint">Tick a chatter to add them to this team. Chatters already on another team aren't shown here.</p>
         <div class="member-chips">
           ${chatters
@@ -1543,17 +1555,6 @@ $("mgr-teams-container").addEventListener("click", (e) => {
 
 // manager team: assign/move chatter (exclusive)
 $("mgr-teams-container").addEventListener("change", async (e) => {
-  // set which admin manages this team
-  const sel = e.target.closest("[data-mgr-team-select]");
-  if (sel) {
-    const teamId = sel.dataset.mgrTeamSelect;
-    const managerId = sel.value || null;
-    const { error } = await db.from("manager_teams").update({ manager_id: managerId }).eq("id", teamId);
-    if (error) { toast("Could not set manager: " + error.message, true); return; }
-    toast(managerId ? "Manager assigned ✓" : "Manager cleared");
-    return;
-  }
-
   const check = e.target;
   if (!check.classList.contains("mgr-chip-check")) return;
   const card = check.closest("[data-mgr-team]");
@@ -2628,6 +2629,7 @@ async function renderPayroll() {
     p.of += c.ofNet; p.fv += c.fvNet; p.fansly += c.fanslyNet; p.slushy += c.slushyNet;
   });
   // manager_id → summed OWN team platform net (excludes floaters)
+  const payrollAdmins = membersCache.filter((x) => x.role === "admin");
   const mgrTeamNet = {};
   const floaterNet = { of: 0, fv: 0, fansly: 0, slushy: 0 };
   (mgrTeams || []).forEach((t) => {
@@ -2638,13 +2640,21 @@ async function renderPayroll() {
       });
       return;
     }
-    if (!t.manager_id) return;
-    // ensure an entry exists for any team that has a manager (even if empty)
-    const acc = mgrTeamNet[t.manager_id] || (mgrTeamNet[t.manager_id] = { of: 0, fv: 0, fansly: 0, slushy: 0 });
+    // hardcoded team → manager
+    const mgr = resolveTeamManager(t.name, payrollAdmins);
+    if (!mgr) return;
+    const acc = mgrTeamNet[mgr.id] || (mgrTeamNet[mgr.id] = { of: 0, fv: 0, fansly: 0, slushy: 0 });
     (mgrAssigns || []).filter((a) => a.team_id === t.id).forEach((a) => {
       const p = platByUser[a.user_id];
       if (p) { acc.of += p.of; acc.fv += p.fv; acc.fansly += p.fansly; acc.slushy += p.slushy; }
     });
+  });
+
+  // make sure every team's manager has an entry (so empty teams still get floater share)
+  (mgrTeams || []).forEach((t) => {
+    if (t.is_floater) return;
+    const mgr = resolveTeamManager(t.name, payrollAdmins);
+    if (mgr && !mgrTeamNet[mgr.id]) mgrTeamNet[mgr.id] = { of: 0, fv: 0, fansly: 0, slushy: 0 };
   });
 
   // the floaters' net is split evenly across all managers who run a team
