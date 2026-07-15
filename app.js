@@ -89,6 +89,17 @@ function realMembers(list) {
   return (list || []).filter((m) => !isTestUser(m));
 }
 
+// Was this member part of the business during the given month?
+// - hides people who joined AFTER the month ended (no rows on old months)
+// - keeps deactivated/fired people on months where they actually have data,
+//   so historical payroll stays accurate
+function wasEmployedIn(m, monthDate, hasDataThisMonth) {
+  const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0, 23, 59, 59);
+  if (m.created_at && new Date(m.created_at) > monthEnd) return false;
+  if (m.active === false && !hasDataThisMonth) return false;
+  return true;
+}
+
 function isNonChatter(profile) {
   // admins are classified as non-chatters: hourly-only timesheets,
   // no sales/commission, no bonuses, not eligible for sales teams.
@@ -2364,7 +2375,7 @@ async function renderBonuses() {
   }
   membersCache = realMembers(members);
 
-  membersCache.filter((m) => !isNonChatter(m)).forEach((m) => {
+  membersCache.filter((m) => !isNonChatter(m) && wasEmployedIn(m, bonusMonth, (bonuses || []).some((b) => b.user_id === m.id) || (fines || []).some((f) => f.user_id === m.id))).forEach((m) => {
     const b = (bonuses || []).find((x) => x.user_id === m.id) ||
       { full_script: "", rebuttal: "", team: "", individual: "", extras: "" };
 
@@ -2397,7 +2408,7 @@ async function renderBonuses() {
   finesBody.innerHTML = "";
   let finesGrand = 0;
 
-  membersCache.filter((m) => !isNonChatter(m)).forEach((m) => {
+  membersCache.filter((m) => !isNonChatter(m) && wasEmployedIn(m, bonusMonth, (bonuses || []).some((b) => b.user_id === m.id) || (fines || []).some((f) => f.user_id === m.id))).forEach((m) => {
     const memberFines = (fines || []).filter((f) => f.user_id === m.id);
     const totalFines = memberFines.reduce((sum, f) => sum + num(f.amount), 0);
     finesGrand += totalFines;
@@ -2687,6 +2698,14 @@ async function renderPayroll() {
     if (isSuperAdmin(m)) return; // super admin is not an employee — excluded from payroll
 
     const rows = (sheets || []).filter((s) => s.user_id === m.id);
+
+    // skip people who hadn't joined yet this month, and deactivated people
+    // with no activity in it (keeps history intact for months they worked)
+    const hasData = rows.length > 0
+      || (monthBonuses || []).some((b) => b.user_id === m.id)
+      || (monthOT || []).some((o) => o.user_id === m.id);
+    if (!wasEmployedIn(m, payMonth, hasData)) return;
+
     let h1Hours = 0, h2Hours = 0, commMonth = 0, netMonth = 0;
 
     rows.forEach((r) => {
