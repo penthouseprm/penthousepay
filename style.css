@@ -1170,23 +1170,21 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 .avg-swatch.sw-clear { background: var(--bg); }
 .avg-swatch:hover { outline: 2px solid var(--accent); }
 
-/* ════════════ UPDATE 40: sticky floating scrollbar ════════════ */
-.floating-scrollbar {
-  position: fixed;
-  bottom: 0;
-  height: 14px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  z-index: 150;
+/* ════════════ UPDATE 40: on-screen scrollbars for wide grids ════════════ */
+/* Metrics & Payroll get an internal scroll region capped to the viewport, so
+   the horizontal scrollbar is always visible at the bottom of the box (never
+   buried far down the page), and the header stays pinned while scrolling. */
+#view-metrics .table-scroll,
+#view-payroll .table-scroll {
+  max-height: calc(100vh - 230px);
+  overflow: auto;
+}
+#view-metrics .metrics-table thead th,
+#view-payroll .sheet thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   background: var(--bg-raised);
-  border-top: 1px solid var(--border);
-  display: none;
 }
-.floating-scrollbar > div { height: 1px; }
-.floating-scrollbar::-webkit-scrollbar { height: 14px; -webkit-appearance: none; }
-.floating-scrollbar::-webkit-scrollbar-track { background: var(--bg); }
-.floating-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--text-dim);
-  border-radius: 8px;
-  border: 3px solid var(--bg-raised);
-}
+/* team divider rows in metrics stay readable under the sticky header */
+#view-metrics .metrics-team-row td { position: sticky; left: 0; }
