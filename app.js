@@ -3426,5 +3426,46 @@ $("payroll-mgr-body").addEventListener("click", (e) => {
   pop.style.top = top + "px";
 });
 
+// ── Sticky horizontal scrollbar ─────────────────────────────
+// For wide tables, mirror the horizontal scrollbar to a bar pinned at the
+// bottom of the viewport, so it's reachable no matter how far down you are.
+(function stickyScrollbars() {
+  let floatBar, floatInner, tracked;
+
+  function ensureBar() {
+    if (floatBar) return;
+    floatBar = document.createElement("div");
+    floatBar.className = "floating-scrollbar";
+    floatInner = document.createElement("div");
+    floatBar.appendChild(floatInner);
+    document.body.appendChild(floatBar);
+    floatBar.addEventListener("scroll", () => {
+      if (tracked) tracked.scrollLeft = floatBar.scrollLeft;
+    });
+  }
+
+  function sync() {
+    const candidates = Array.from(document.querySelectorAll(".view:not(.hidden) .table-scroll"));
+    tracked = candidates.find((el) => el.scrollWidth > el.clientWidth + 2 && el.getBoundingClientRect().bottom > window.innerHeight);
+    if (!tracked) { if (floatBar) floatBar.style.display = "none"; return; }
+
+    ensureBar();
+    const rect = tracked.getBoundingClientRect();
+    floatBar.style.display = "block";
+    floatBar.style.left = rect.left + "px";
+    floatBar.style.width = rect.width + "px";
+    floatInner.style.width = tracked.scrollWidth + "px";
+    floatBar.scrollLeft = tracked.scrollLeft;
+  }
+
+  document.addEventListener("scroll", (e) => {
+    if (tracked && e.target === tracked && floatBar) floatBar.scrollLeft = tracked.scrollLeft;
+    sync();
+  }, true);
+  window.addEventListener("scroll", sync, { passive: true });
+  window.addEventListener("resize", sync);
+  setInterval(sync, 600);
+})();
+
 // ── Boot ────────────────────────────────────────────────────
 init();

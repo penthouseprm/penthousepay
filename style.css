@@ -245,7 +245,22 @@ input:focus, select:focus { border-color: var(--accent); }
 .invite-item .spacer { flex: 1; }
 
 /* ════════════ SHEET TABLE ════════════ */
-.table-scroll { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
+.table-scroll {
+  overflow-x: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  scrollbar-gutter: stable;
+}
+/* force the horizontal scrollbar to always show rather than auto-hide */
+.table-scroll::-webkit-scrollbar { height: 12px; -webkit-appearance: none; }
+.table-scroll::-webkit-scrollbar-track { background: var(--bg); border-radius: 8px; }
+.table-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 8px;
+  border: 2px solid var(--bg);
+}
+.table-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+.table-scroll { scrollbar-width: auto; scrollbar-color: var(--border) var(--bg); }
 .sheet {
   width: 100%;
   border-collapse: collapse;
@@ -1154,3 +1169,24 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 .avg-swatch.sw-hotpink { background: #ff2d92; }
 .avg-swatch.sw-clear { background: var(--bg); }
 .avg-swatch:hover { outline: 2px solid var(--accent); }
+
+/* ════════════ UPDATE 40: sticky floating scrollbar ════════════ */
+.floating-scrollbar {
+  position: fixed;
+  bottom: 0;
+  height: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  z-index: 150;
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border);
+  display: none;
+}
+.floating-scrollbar > div { height: 1px; }
+.floating-scrollbar::-webkit-scrollbar { height: 14px; -webkit-appearance: none; }
+.floating-scrollbar::-webkit-scrollbar-track { background: var(--bg); }
+.floating-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--text-dim);
+  border-radius: 8px;
+  border: 3px solid var(--bg-raised);
+}
