@@ -1097,7 +1097,6 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 
 .metrics-table th { white-space: nowrap; font-size: 11px; }
 .metrics-table .col-center { text-align: center; }
-.metrics-team-cell { display: none; }  /* team shown via divider rows instead */
 .metrics-team-row td {
   background: var(--accent-soft) !important;
   font-family: var(--font-display); font-weight: 700;

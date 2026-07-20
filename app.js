@@ -2675,13 +2675,13 @@ async function renderMetrics() {
 
   const [
     { data: members, error: mErr },
-    { data: mgrTeams, error: tErr },
-    { data: mgrAssigns, error: aErr },
+    { data: modelTeams, error: tErr },
+    { data: teamMembers, error: aErr },
     { data: metricRows, error: rErr },
   ] = await Promise.all([
     db.from("profiles").select("*").order("name", { ascending: true }),
-    db.from("manager_teams").select("*"),
-    db.from("manager_team_members").select("*"),
+    db.from("teams").select("*").order("created_at", { ascending: true }),
+    db.from("team_members").select("*"),
     db.from("metrics").select("*").eq("month", mKey),
   ]);
 
@@ -2690,18 +2690,21 @@ async function renderMetrics() {
   body.innerHTML = "";
 
   if (mErr || tErr || aErr || rErr) {
-    body.innerHTML = `<tr><td colspan="18">Failed to load metrics.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="17">Failed to load metrics.</td></tr>`;
     return;
   }
 
   const chatters = realMembers(members).filter((m) => m.role === "member");
 
-  // team name per chatter (from manager teams); default "Unassigned"
-  const teamNameByUser = {};
-  (mgrAssigns || []).forEach((a) => {
-    const t = (mgrTeams || []).find((x) => x.id === a.team_id);
-    if (t) teamNameByUser[a.user_id] = t.name;
+  // model-team name per chatter (from Team Sales teams); a chatter may be on
+  // several — join names; default "Unassigned"
+  const teamNamesByUser = {};
+  (teamMembers || []).forEach((tm) => {
+    const t = (modelTeams || []).find((x) => x.id === tm.team_id);
+    if (!t) return;
+    (teamNamesByUser[tm.user_id] = teamNamesByUser[tm.user_id] || []).push(t.name);
   });
+  const teamLabelOf = (uid) => (teamNamesByUser[uid] || []).join(", ") || "Unassigned";
 
   // total sales + hours per chatter for the month
   const statByUser = {};
@@ -2716,28 +2719,22 @@ async function renderMetrics() {
   const existing = {};
   (metricRows || []).forEach((row) => { existing[row.user_id] = row; });
 
-  // order chatters by team (fixed order), then name
-  const teamOrder = ["Team Kim", "Team Macky", "Team Janus", "Floaters"];
-  const teamRank = (name) => {
-    const i = teamOrder.indexOf(name);
-    return i === -1 ? 98 : i;
-  };
+  // order chatters by their (first) team name alphabetically, then chatter name;
+  // Unassigned last
+  const primaryTeam = (uid) => (teamNamesByUser[uid] || [])[0] || "~Unassigned";
   chatters.sort((a, b) => {
-    const ta = teamNameByUser[a.id] || "Unassigned";
-    const tb = teamNameByUser[b.id] || "Unassigned";
-    if (teamRank(ta) !== teamRank(tb)) return teamRank(ta) - teamRank(tb);
+    const ta = primaryTeam(a.id), tb = primaryTeam(b.id);
     if (ta !== tb) return ta.localeCompare(tb);
     return (a.name || a.email).localeCompare(b.name || b.email);
   });
 
-  // rows we may need to seed (first time seen this month)
   const toSeed = [];
   let lastTeam = null;
 
   chatters.forEach((m) => {
     const stat = statByUser[m.id] || { sales: 0, hours: 0 };
     const avg = stat.hours > 0 ? stat.sales / stat.hours : 0;
-    const teamName = teamNameByUser[m.id] || "Unassigned";
+    const teamName = teamLabelOf(m.id);
 
     let row = existing[m.id];
     if (!row) {
@@ -2763,7 +2760,7 @@ async function renderMetrics() {
     if (teamName !== lastTeam) {
       const divider = document.createElement("tr");
       divider.className = "metrics-team-row";
-      divider.innerHTML = `<td colspan="18">${teamName}</td>`;
+      divider.innerHTML = `<td colspan="17">${teamName}</td>`;
       body.appendChild(divider);
       lastTeam = teamName;
     }
@@ -2777,11 +2774,12 @@ async function renderMetrics() {
     const fb = (field, val) =>
       `<td><textarea class="metric-fb" data-fb-field="${field}" data-fb-user="${m.id}" rows="2" placeholder="–">${val || ""}</textarea></td>`;
 
+    const hoursDisp = Math.round(stat.hours * 100) / 100;
+
     tr.innerHTML = `
-      <td class="metrics-team-cell">${teamName}</td>
       <td>${m.name || m.email}</td>
       <td class="col-num">${fmt(stat.sales)}</td>
-      <td class="col-num">${stat.hours}</td>
+      <td class="col-num">${hoursDisp}</td>
       <td class="col-num metric-avg ${row.avg_color ? "avg-" + row.avg_color : ""}" data-avg-user="${m.id}" title="Click to set colour">${fmt(avg)}</td>
       ${cnt("coaching", row.coaching)}
       ${cnt("gg_promo", row.gg_promo)}
