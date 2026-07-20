@@ -2837,16 +2837,45 @@ $("metrics-body").addEventListener("contextmenu", async (e) => {
   saveMetric(btn.dataset.countUser, { [btn.dataset.countField]: v });
 });
 
-// avg colour cycle: none → red → pink → hotpink → none
+// avg colour picker: click the cell → choose red / light pink / hot pink / clear
 $("metrics-body").addEventListener("click", async (e) => {
   const cell = e.target.closest(".metric-avg");
+  document.querySelectorAll(".avg-color-pop").forEach((p) => p.remove());
   if (!cell) return;
-  const cur = METRICS_COLORS.findIndex((c) => cell.classList.contains("avg-" + c));
-  METRICS_COLORS.forEach((c) => cell.classList.remove("avg-" + c));
-  const next = cur + 1 >= METRICS_COLORS.length ? -1 : cur + 1;
-  const color = next === -1 ? null : METRICS_COLORS[next];
-  if (color) cell.classList.add("avg-" + color);
-  saveMetric(cell.dataset.avgUser, { avg_color: color });
+  e.stopPropagation();
+
+  const pop = document.createElement("div");
+  pop.className = "avg-color-pop";
+  pop.innerHTML = `
+    <button class="avg-swatch sw-red" data-color="red" title="Red"></button>
+    <button class="avg-swatch sw-pink" data-color="pink" title="Light pink"></button>
+    <button class="avg-swatch sw-hotpink" data-color="hotpink" title="Hot pink"></button>
+    <button class="avg-swatch sw-clear" data-color="" title="Clear">✕</button>
+  `;
+  document.body.appendChild(pop);
+  const r = cell.getBoundingClientRect();
+  let left = r.left;
+  let top = r.bottom + 4;
+  if (left + pop.offsetWidth > window.innerWidth - 8) left = window.innerWidth - pop.offsetWidth - 8;
+  if (top + pop.offsetHeight > window.innerHeight - 8) top = r.top - pop.offsetHeight - 4;
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+
+  pop.querySelectorAll(".avg-swatch").forEach((sw) => {
+    sw.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const color = sw.dataset.color || null;
+      METRICS_COLORS.forEach((c) => cell.classList.remove("avg-" + c));
+      if (color) cell.classList.add("avg-" + color);
+      saveMetric(cell.dataset.avgUser, { avg_color: color });
+      pop.remove();
+    });
+  });
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".metric-avg") && !e.target.closest(".avg-color-pop")) {
+    document.querySelectorAll(".avg-color-pop").forEach((p) => p.remove());
+  }
 });
 
 // checkboxes
