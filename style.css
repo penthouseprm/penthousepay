@@ -1076,3 +1076,11 @@ button.sub-badge.unsub {
 button.sub-badge.unsub:hover { background: rgba(240,122,122,0.16); color: var(--c-total); }
 button.sub-badge.unsub:hover .sub-tick { display: none; }
 button.sub-badge.unsub:hover .sub-redo { display: inline; }
+
+/* ════════════ UPDATE 37: per-day rate override (admin) ════════════ */
+.rate-override-cell { background: rgba(224,182,84,0.05); }
+.rate-override {
+  max-width: 74px;
+  border-color: rgba(224,182,84,0.35) !important;
+}
+.rate-override:focus { border-color: var(--accent) !important; }

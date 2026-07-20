@@ -130,8 +130,13 @@ function calcRow(row, profile) {
   const fanslyNet = num(row.fansly_gross) * NET_RATES.fansly;
   const total = ofNet + fvNet + slushyNet + fanslyNet;
   const commission = total * num(profile.commission_rate);
-  const hoursPay = num(row.hours) * num(profile.hourly_rate);
-  return { ofNet, fvNet, slushyNet, fanslyNet, total, commission, hoursPay };
+  // rate is snapshot on the row; fall back to the profile's current rate for
+  // legacy rows that predate per-day rates
+  const rate = (row.hourly_rate === null || row.hourly_rate === undefined || row.hourly_rate === "")
+    ? num(profile.hourly_rate)
+    : num(row.hourly_rate);
+  const hoursPay = num(row.hours) * rate;
+  return { ofNet, fvNet, slushyNet, fanslyNet, total, commission, hoursPay, rate };
 }
 
 // ════════════════════════════════════════════════════════════
@@ -447,7 +452,9 @@ async function loadSubmissions(userId, monthDate) {
 // Renders two half-month sections into a container.
 // mode: "self" (member's own sheet) | "admin" (admin editing a member)
 // ════════════════════════════════════════════════════════════
-const SHEET_HEAD = `
+function sheetHead(mode) {
+  const rateTh = mode === "admin" ? `<th class="col-num th-hours">Rate $</th>` : "";
+  return `
   <tr>
     <th class="col-date">Date</th>
     <th class="col-num th-hours">Hours</th>
@@ -461,18 +468,24 @@ const SHEET_HEAD = `
     <th class="col-num th-fansly net">Fansly Net $</th>
     <th class="col-num th-total">Total Sales</th>
     <th class="col-num th-comm">Commission $</th>
+    ${rateTh}
     <th class="col-num th-pay">Hours $</th>
   </tr>
 `;
+}
 
 // non-chatters: hourly only, no sales columns
-const NC_SHEET_HEAD = `
+function ncSheetHead(mode) {
+  const rateTh = mode === "admin" ? `<th class="col-num th-hours">Rate $</th>` : "";
+  return `
   <tr>
     <th class="col-date">Date</th>
     <th class="col-num th-hours">Hours</th>
+    ${rateTh}
     <th class="col-num th-pay">Hours $</th>
   </tr>
 `;
+}
 
 async function renderUserSheet(container, profile, monthDate, mode) {
   container.dataset.userId = profile.id;
@@ -532,7 +545,7 @@ async function renderUserSheet(container, profile, monthDate, mode) {
     scroll.className = "table-scroll";
     const table = document.createElement("table");
     table.className = "sheet" + (isNonChatter(profile) ? " plain" : "");
-    table.innerHTML = `<thead>${isNonChatter(profile) ? NC_SHEET_HEAD : SHEET_HEAD}</thead>`;
+    table.innerHTML = `<thead>${isNonChatter(profile) ? ncSheetHead(mode) : sheetHead(mode)}</thead>`;
     const tbody = document.createElement("tbody");
     tbody.className = "half-body";
 
@@ -545,6 +558,9 @@ async function renderUserSheet(container, profile, monthDate, mode) {
 
       const tr = document.createElement("tr");
       tr.dataset.date = date;
+      if (row.hourly_rate !== null && row.hourly_rate !== undefined && row.hourly_rate !== "") {
+        tr.dataset.rowRate = String(row.hourly_rate);
+      }
       if (isWeekend) tr.classList.add("weekend");
 
       const label = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
@@ -553,10 +569,21 @@ async function renderUserSheet(container, profile, monthDate, mode) {
         ? ` <button class="ot-flag" type="button" data-ot-amount="${otAmount.toFixed(2)}" title="Overtime approved">⏱</button>`
         : "";
 
+      // admin-only rate override cell (shown when an admin opens a member's sheet)
+      const showRate = mode === "admin";
+      const effRate = (row.hourly_rate === null || row.hourly_rate === undefined || row.hourly_rate === "")
+        ? num(profile.hourly_rate)
+        : num(row.hourly_rate);
+      const rateCell = showRate
+        ? `<td class="col-num rate-override-cell"><input class="cell rate-override" data-rate-override type="number" min="0" step="0.25" value="${effRate}" title="Hourly rate for this day"></td>`
+        : "";
+      const rateHeadNeeded = showRate;
+
       if (isNonChatter(profile)) {
         tr.innerHTML = `
           <td class="col-date">${label}${otIcon}</td>
           <td class="col-num"><input class="cell hours" data-field="hours" type="number" min="0" step="0.5" value="${row.hours || ""}" placeholder="–" ${dis}></td>
+          ${rateCell}
           <td class="col-num cell-pay" data-cell="pay"></td>
         `;
       } else {
@@ -573,6 +600,7 @@ async function renderUserSheet(container, profile, monthDate, mode) {
           <td class="col-num net-fansly" data-cell="fansly-net"></td>
           <td class="col-num cell-total" data-cell="total"></td>
           <td class="col-num cell-comm" data-cell="comm"></td>
+          ${rateCell}
           <td class="col-num cell-pay" data-cell="pay"></td>
         `;
       }
@@ -648,16 +676,21 @@ function recalcDisplayRow(tr, profile) {
     const el = tr.querySelector(`[data-cell="${name}"]`);
     if (el) el.textContent = val;
   };
-  const calc = calcRow(
-    {
-      hours: get("hours"),
-      of_gross: get("of_gross"),
-      fv_gross: get("fv_gross"),
-      slushy_gross: get("slushy_gross"),
-      fansly_gross: get("fansly_gross"),
-    },
-    profile
-  );
+  // admin rate override input takes precedence, else the row's stored rate
+  const rateInput = tr.querySelector(".rate-override");
+  const rowObj = {
+    hours: get("hours"),
+    of_gross: get("of_gross"),
+    fv_gross: get("fv_gross"),
+    slushy_gross: get("slushy_gross"),
+    fansly_gross: get("fansly_gross"),
+  };
+  if (rateInput && rateInput.value !== "") {
+    rowObj.hourly_rate = rateInput.value;
+  } else if (tr.dataset.rowRate !== undefined && tr.dataset.rowRate !== "") {
+    rowObj.hourly_rate = tr.dataset.rowRate;
+  }
+  const calc = calcRow(rowObj, profile);
   setCell("of-net", fmt(calc.ofNet));
   setCell("fv-net", fmt(calc.fvNet));
   setCell("slushy-net", fmt(calc.slushyNet));
@@ -699,11 +732,15 @@ function recalcHalfTotals(section, profile) {
     sums.pay += calc.hoursPay;
   });
 
+  const hasRateCol = !!section.querySelector(".rate-override");
+  const rateFootCell = hasRateCol ? `<td class="col-num"></td>` : "";
+
   if (section.dataset.nc === "1") {
     tfoot.innerHTML = `
       <tr>
         <td>TOTAL</td>
         <td class="col-num">${sums.hours}</td>
+        ${rateFootCell}
         <td class="col-num cell-pay">${fmt(sums.pay)}</td>
       </tr>
     `;
@@ -724,6 +761,7 @@ function recalcHalfTotals(section, profile) {
       <td class="col-num net-fansly">${fmt(sums.fanslyNet)}</td>
       <td class="col-num cell-total">${fmt(sums.total)}</td>
       <td class="col-num cell-comm">${fmt(sums.comm)}</td>
+      ${rateFootCell}
       <td class="col-num cell-pay">${fmt(sums.pay)}</td>
     </tr>
   `;
@@ -732,7 +770,8 @@ function recalcHalfTotals(section, profile) {
 // shared delegated input handler for both sheet containers
 function handleSheetInput(e) {
   const input = e.target;
-  if (!input.classList.contains("cell") || input.disabled) return;
+  const isRate = input.classList.contains("rate-override");
+  if ((!input.classList.contains("cell") && !isRate) || input.disabled) return;
 
   const container = e.currentTarget;
   const tr = input.closest("tr");
@@ -741,6 +780,11 @@ function handleSheetInput(e) {
   const profile = targetUserId === currentUser.id
     ? currentProfile
     : (membersCache.find((m) => m.id === targetUserId) || currentProfile);
+
+  // rate override drives the row's stored rate
+  if (isRate) {
+    tr.dataset.rowRate = input.value === "" ? "" : String(num(input.value));
+  }
 
   recalcDisplayRow(tr, profile);
   recalcHalfTotals(section, profile);
@@ -770,6 +814,20 @@ async function saveSheetRow(tr, targetUserId, date) {
     updated_at: new Date().toISOString(),
   };
 
+  // snapshot the hourly rate onto the row so mid-month rate changes only
+  // affect days entered after the change. Prefer an existing stored/override
+  // rate (kept on the row's dataset); only fall back to the current profile
+  // rate when the row has none yet.
+  const existingRate = tr.dataset.rowRate;
+  if (existingRate !== undefined && existingRate !== "") {
+    payload.hourly_rate = num(existingRate);
+  } else {
+    const prof = memberSheetTarget && memberSheetTarget.id === targetUserId
+      ? memberSheetTarget
+      : currentProfile;
+    payload.hourly_rate = num(prof.hourly_rate);
+  }
+
   const { error } = await db
     .from("timesheets")
     .upsert(payload, { onConflict: "user_id,entry_date" });
@@ -779,6 +837,7 @@ async function saveSheetRow(tr, targetUserId, date) {
     toast("Save failed: " + error.message, true);
     return;
   }
+  tr.dataset.rowRate = String(payload.hourly_rate);
   setSaveStatus("saved", "All changes saved");
 }
 
