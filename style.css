@@ -1193,10 +1193,15 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 /* vertical outline + subtle tint so the column stands out; the per-cell
    red/pink/hotpink swatches still override the tint when a colour is set */
 .metric-avg-head {
-  background: rgba(224,182,84,0.28) !important;
+  /* opaque: solid raised bg + gold tint layered on top, so scrolling cells
+     never show through the sticky header */
+  background:
+    linear-gradient(rgba(224,182,84,0.28), rgba(224,182,84,0.28)),
+    var(--bg-raised) !important;
   border-left: 2px solid var(--accent) !important;
   border-right: 2px solid var(--accent) !important;
   color: var(--accent) !important;
+  z-index: 6 !important;
 }
 .metrics-table td.metric-avg {
   border-left: 2px solid var(--accent);
