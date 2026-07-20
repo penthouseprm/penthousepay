@@ -1193,7 +1193,7 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 /* vertical outline + subtle tint so the column stands out; the per-cell
    red/pink/hotpink swatches still override the tint when a colour is set */
 .metric-avg-head {
-  background: rgba(224,182,84,0.14) !important;
+  background: rgba(224,182,84,0.28) !important;
   border-left: 2px solid var(--accent) !important;
   border-right: 2px solid var(--accent) !important;
   color: var(--accent) !important;
@@ -1201,7 +1201,7 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 .metrics-table td.metric-avg {
   border-left: 2px solid var(--accent);
   border-right: 2px solid var(--accent);
-  background: rgba(224,182,84,0.07);
+  background: rgba(224,182,84,0.20) !important;
   font-weight: 700;
 }
 /* keep column borders visible even on the coloured swatches */
