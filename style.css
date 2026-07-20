@@ -1084,3 +1084,47 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
   border-color: rgba(224,182,84,0.35) !important;
 }
 .rate-override:focus { border-color: var(--accent) !important; }
+
+/* ════════════ UPDATE 38: metrics ════════════ */
+.metrics-key {
+  display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 16px; margin-bottom: 16px;
+}
+.metrics-key-item { font-size: 13px; color: var(--text-dim); }
+.metrics-key-item strong { color: var(--accent); }
+.metrics-key-note { font-size: 12px; color: var(--text-dim); margin-left: auto; }
+
+.metrics-table th { white-space: nowrap; font-size: 11px; }
+.metrics-table .col-center { text-align: center; }
+.metrics-team-cell { display: none; }  /* team shown via divider rows instead */
+.metrics-team-row td {
+  background: var(--accent-soft) !important;
+  font-family: var(--font-display); font-weight: 700;
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--accent); padding: 8px 12px !important;
+}
+
+.metric-count {
+  border: none; border-radius: 6px; cursor: pointer;
+  font-size: 11px; font-weight: 700; padding: 4px 10px;
+  white-space: nowrap; color: #3a2600;
+  font-family: var(--font-body);
+}
+.count-high { background: #d94a4a; color: #fff; }        /* 5 */
+.count-mid  { background: #e8963f; color: #2a1500; }     /* 3–4 */
+.count-low  { background: #f4d58a; color: #3a2600; }     /* 1–2 */
+.count-done { background: rgba(88,201,136,0.18); color: var(--c-fv); }  /* 0 */
+
+.metric-avg { cursor: pointer; font-variant-numeric: tabular-nums; }
+.metric-avg.avg-red     { background: #d94a4a !important; color: #fff; }
+.metric-avg.avg-pink    { background: #f4b8d0 !important; color: #4a1030; }
+.metric-avg.avg-hotpink { background: #ff2d92 !important; color: #fff; }
+
+.metric-fb {
+  width: 100%; min-width: 150px; resize: vertical;
+  font-size: 12px; padding: 5px 8px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-family: var(--font-body);
+}
+.metric-fb:focus { border-color: var(--accent); }

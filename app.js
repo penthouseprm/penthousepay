@@ -378,7 +378,7 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
     document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     const view = btn.dataset.view;
-    ["my-timesheet", "overtime", "request-leave", "team", "team-sales", "bonuses", "overtime-rq", "leave-rq", "payroll"].forEach((v) => {
+    ["my-timesheet", "overtime", "request-leave", "team", "team-sales", "bonuses", "overtime-rq", "leave-rq", "metrics", "payroll"].forEach((v) => {
       $("view-" + v).classList.toggle("hidden", v !== view);
     });
     if (view === "my-timesheet") renderMySheet();
@@ -389,6 +389,7 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
     if (view === "bonuses") renderBonuses();
     if (view === "overtime-rq") renderOvertimeRQ();
     if (view === "leave-rq") renderLeaveRQ();
+    if (view === "metrics") renderMetrics();
     if (view === "payroll") renderPayroll();
   });
 });
@@ -2642,6 +2643,231 @@ $("pay-month-prev").addEventListener("click", () => {
 $("pay-month-next").addEventListener("click", () => {
   payMonth = new Date(payMonth.getFullYear(), payMonth.getMonth() + 1, 1);
   renderPayroll();
+});
+
+// ════════════════════════════════════════════════════════════
+// METRICS (admin)
+// ════════════════════════════════════════════════════════════
+let metricsMonth = startOfMonth(new Date());
+
+const METRICS_COLORS = ["red", "pink", "hotpink"]; // avg cell colour cycle
+const REVIEW_COLS = ["gg_promo", "spender", "organic"]; // always start at 1
+
+function coachingSeed(avgPerHr) {
+  if (avgPerHr >= 35) return 1;
+  if (avgPerHr >= 25) return 3;
+  return 5;
+}
+
+$("metrics-month-prev").addEventListener("click", () => {
+  metricsMonth = new Date(metricsMonth.getFullYear(), metricsMonth.getMonth() - 1, 1);
+  renderMetrics();
+});
+$("metrics-month-next").addEventListener("click", () => {
+  metricsMonth = new Date(metricsMonth.getFullYear(), metricsMonth.getMonth() + 1, 1);
+  renderMetrics();
+});
+
+async function renderMetrics() {
+  $("metrics-month-label").textContent = monthLabel(metricsMonth);
+  const { first, last } = monthRange(metricsMonth);
+  const mKey = bonusMonthKey(metricsMonth);
+
+  const [
+    { data: members, error: mErr },
+    { data: mgrTeams, error: tErr },
+    { data: mgrAssigns, error: aErr },
+    { data: metricRows, error: rErr },
+  ] = await Promise.all([
+    db.from("profiles").select("*").order("name", { ascending: true }),
+    db.from("manager_teams").select("*"),
+    db.from("manager_team_members").select("*"),
+    db.from("metrics").select("*").eq("month", mKey),
+  ]);
+
+  const sheets = await fetchAllTimesheets(first, last);
+  const body = $("metrics-body");
+  body.innerHTML = "";
+
+  if (mErr || tErr || aErr || rErr) {
+    body.innerHTML = `<tr><td colspan="18">Failed to load metrics.</td></tr>`;
+    return;
+  }
+
+  const chatters = realMembers(members).filter((m) => m.role === "member");
+
+  // team name per chatter (from manager teams); default "Unassigned"
+  const teamNameByUser = {};
+  (mgrAssigns || []).forEach((a) => {
+    const t = (mgrTeams || []).find((x) => x.id === a.team_id);
+    if (t) teamNameByUser[a.user_id] = t.name;
+  });
+
+  // total sales + hours per chatter for the month
+  const statByUser = {};
+  (sheets || []).forEach((r) => {
+    const m = chatters.find((x) => x.id === r.user_id);
+    if (!m) return;
+    const s = statByUser[r.user_id] || (statByUser[r.user_id] = { sales: 0, hours: 0 });
+    s.sales += calcRow(r, m).total;
+    s.hours += num(r.hours);
+  });
+
+  const existing = {};
+  (metricRows || []).forEach((row) => { existing[row.user_id] = row; });
+
+  // order chatters by team (fixed order), then name
+  const teamOrder = ["Team Kim", "Team Macky", "Team Janus", "Floaters"];
+  const teamRank = (name) => {
+    const i = teamOrder.indexOf(name);
+    return i === -1 ? 98 : i;
+  };
+  chatters.sort((a, b) => {
+    const ta = teamNameByUser[a.id] || "Unassigned";
+    const tb = teamNameByUser[b.id] || "Unassigned";
+    if (teamRank(ta) !== teamRank(tb)) return teamRank(ta) - teamRank(tb);
+    if (ta !== tb) return ta.localeCompare(tb);
+    return (a.name || a.email).localeCompare(b.name || b.email);
+  });
+
+  // rows we may need to seed (first time seen this month)
+  const toSeed = [];
+  let lastTeam = null;
+
+  chatters.forEach((m) => {
+    const stat = statByUser[m.id] || { sales: 0, hours: 0 };
+    const avg = stat.hours > 0 ? stat.sales / stat.hours : 0;
+    const teamName = teamNameByUser[m.id] || "Unassigned";
+
+    let row = existing[m.id];
+    if (!row) {
+      // seed a new metrics row for this month
+      row = {
+        user_id: m.id,
+        month: mKey,
+        avg_color: null,
+        coaching: coachingSeed(avg),
+        gg_promo: 1,
+        spender: 1,
+        organic: 1,
+        msg_history: false,
+        fb1: "", fb1_impl: false,
+        fb2: "", fb2_impl: false,
+        fb3: "", fb3_impl: false,
+        fb4: "", fb4_impl: false,
+      };
+      toSeed.push(row);
+    }
+
+    // team divider row
+    if (teamName !== lastTeam) {
+      const divider = document.createElement("tr");
+      divider.className = "metrics-team-row";
+      divider.innerHTML = `<td colspan="18">${teamName}</td>`;
+      body.appendChild(divider);
+      lastTeam = teamName;
+    }
+
+    const tr = document.createElement("tr");
+    tr.dataset.metricUser = m.id;
+    const cnt = (field, val) =>
+      `<td class="col-center"><button class="metric-count ${countClass(val)}" data-count-field="${field}" data-count-user="${m.id}">${val} Remaining</button></td>`;
+    const chk = (field, val) =>
+      `<td class="col-center"><input type="checkbox" class="metric-check" data-check-field="${field}" data-check-user="${m.id}" ${val ? "checked" : ""}></td>`;
+    const fb = (field, val) =>
+      `<td><textarea class="metric-fb" data-fb-field="${field}" data-fb-user="${m.id}" rows="2" placeholder="–">${val || ""}</textarea></td>`;
+
+    tr.innerHTML = `
+      <td class="metrics-team-cell">${teamName}</td>
+      <td>${m.name || m.email}</td>
+      <td class="col-num">${fmt(stat.sales)}</td>
+      <td class="col-num">${stat.hours}</td>
+      <td class="col-num metric-avg ${row.avg_color ? "avg-" + row.avg_color : ""}" data-avg-user="${m.id}" title="Click to set colour">${fmt(avg)}</td>
+      ${cnt("coaching", row.coaching)}
+      ${cnt("gg_promo", row.gg_promo)}
+      ${cnt("spender", row.spender)}
+      ${cnt("organic", row.organic)}
+      ${chk("msg_history", row.msg_history)}
+      ${fb("fb1", row.fb1)}${chk("fb1_impl", row.fb1_impl)}
+      ${fb("fb2", row.fb2)}${chk("fb2_impl", row.fb2_impl)}
+      ${fb("fb3", row.fb3)}${chk("fb3_impl", row.fb3_impl)}
+      ${fb("fb4", row.fb4)}${chk("fb4_impl", row.fb4_impl)}
+    `;
+    body.appendChild(tr);
+  });
+
+  // persist any freshly-seeded rows so counts lock in for the month
+  if (toSeed.length) {
+    await db.from("metrics").upsert(toSeed, { onConflict: "user_id,month" });
+  }
+}
+
+function countClass(v) {
+  if (v <= 0) return "count-done";
+  if (v >= 5) return "count-high";
+  if (v >= 3) return "count-mid";
+  return "count-low";
+}
+
+async function saveMetric(userId, patch) {
+  const { error } = await db.from("metrics")
+    .update(patch)
+    .eq("user_id", userId)
+    .eq("month", bonusMonthKey(metricsMonth));
+  if (error) toast("Metrics save failed: " + error.message, true);
+}
+
+// count decrement (click) / increment (right-click)
+$("metrics-body").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".metric-count");
+  if (!btn) return;
+  let v = parseInt(btn.textContent, 10) || 0;
+  if (v <= 0) return;
+  v -= 1;
+  btn.textContent = `${v} Remaining`;
+  btn.className = `metric-count ${countClass(v)}`;
+  saveMetric(btn.dataset.countUser, { [btn.dataset.countField]: v });
+});
+$("metrics-body").addEventListener("contextmenu", async (e) => {
+  const btn = e.target.closest(".metric-count");
+  if (!btn) return;
+  e.preventDefault();
+  let v = parseInt(btn.textContent, 10) || 0;
+  v += 1;
+  btn.textContent = `${v} Remaining`;
+  btn.className = `metric-count ${countClass(v)}`;
+  saveMetric(btn.dataset.countUser, { [btn.dataset.countField]: v });
+});
+
+// avg colour cycle: none → red → pink → hotpink → none
+$("metrics-body").addEventListener("click", async (e) => {
+  const cell = e.target.closest(".metric-avg");
+  if (!cell) return;
+  const cur = METRICS_COLORS.findIndex((c) => cell.classList.contains("avg-" + c));
+  METRICS_COLORS.forEach((c) => cell.classList.remove("avg-" + c));
+  const next = cur + 1 >= METRICS_COLORS.length ? -1 : cur + 1;
+  const color = next === -1 ? null : METRICS_COLORS[next];
+  if (color) cell.classList.add("avg-" + color);
+  saveMetric(cell.dataset.avgUser, { avg_color: color });
+});
+
+// checkboxes
+$("metrics-body").addEventListener("change", async (e) => {
+  const chk = e.target.closest(".metric-check");
+  if (!chk) return;
+  saveMetric(chk.dataset.checkUser, { [chk.dataset.checkField]: chk.checked });
+});
+
+// feedback text (debounced)
+let metricFbTimers = {};
+$("metrics-body").addEventListener("input", (e) => {
+  const ta = e.target.closest(".metric-fb");
+  if (!ta) return;
+  const key = ta.dataset.fbUser + ":" + ta.dataset.fbField;
+  clearTimeout(metricFbTimers[key]);
+  metricFbTimers[key] = setTimeout(() => {
+    saveMetric(ta.dataset.fbUser, { [ta.dataset.fbField]: ta.value });
+  }, 700);
 });
 
 async function renderPayroll() {

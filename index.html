@@ -66,6 +66,7 @@
         <button class="nav-btn admin-only hidden" data-view="bonuses" type="button">Bonuses</button>
         <button class="nav-btn admin-only hidden" data-view="overtime-rq" type="button">Overtime RQ</button>
         <button class="nav-btn admin-only hidden" data-view="leave-rq" type="button">Leave RQ</button>
+        <button class="nav-btn admin-only hidden" data-view="metrics" type="button">Metrics</button>
         <button class="nav-btn admin-only hidden" data-view="payroll" type="button">Payroll</button>
       </nav>
     </div>
@@ -382,6 +383,53 @@
         </table>
       </div>
     </section>
+  </main>
+
+  <!-- ── METRICS (admin) ── -->
+  <main id="view-metrics" class="view hidden">
+    <div class="view-head">
+      <h2>Metrics</h2>
+      <div class="month-nav">
+        <button id="metrics-month-prev" class="btn btn-ghost" type="button">‹</button>
+        <span id="metrics-month-label" class="month-label"></span>
+        <button id="metrics-month-next" class="btn btn-ghost" type="button">›</button>
+      </div>
+    </div>
+
+    <div class="metrics-key">
+      <span class="metrics-key-item"><strong>$35+</strong> = 1 call p/w</span>
+      <span class="metrics-key-item"><strong>$25+</strong> = 3 calls p/w</span>
+      <span class="metrics-key-item"><strong>&lt;$25</strong> = 5 calls p/w</span>
+      <span class="metrics-key-note">Coaching Calls auto-seed from sales/hr each month; click a count to decrease, right-click to increase.</span>
+    </div>
+
+    <div class="table-scroll">
+      <table class="sheet metrics-table" id="metrics-table">
+        <thead>
+          <tr>
+            <th>Team</th>
+            <th>Chatter</th>
+            <th class="col-num">Total Sales $</th>
+            <th class="col-num">Hours</th>
+            <th class="col-num">Avg $/hr</th>
+            <th class="col-center">Coaching Calls</th>
+            <th class="col-center">GG Promotion Review</th>
+            <th class="col-center">$100+ Spender Review</th>
+            <th class="col-center">Organic Promo Review</th>
+            <th class="col-center">Msg History</th>
+            <th>Days 1–7</th>
+            <th class="col-center">Impl?</th>
+            <th>Days 8–15</th>
+            <th class="col-center">Impl?</th>
+            <th>Days 16–23</th>
+            <th class="col-center">Impl?</th>
+            <th>Days 24–end</th>
+            <th class="col-center">Impl?</th>
+          </tr>
+        </thead>
+        <tbody id="metrics-body"></tbody>
+      </table>
+    </div>
   </main>
 
   <!-- ── PAYROLL (admin) ── -->
