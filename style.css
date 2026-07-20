@@ -1188,3 +1188,26 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 }
 /* team divider rows in metrics stay readable under the sticky header */
 #view-metrics .metrics-team-row td { position: sticky; left: 0; }
+
+/* ════════════ UPDATE 41: highlight Avg $/hr column ════════════ */
+/* vertical outline + subtle tint so the column stands out; the per-cell
+   red/pink/hotpink swatches still override the tint when a colour is set */
+.metric-avg-head {
+  background: rgba(224,182,84,0.14) !important;
+  border-left: 2px solid var(--accent) !important;
+  border-right: 2px solid var(--accent) !important;
+  color: var(--accent) !important;
+}
+.metrics-table td.metric-avg {
+  border-left: 2px solid var(--accent);
+  border-right: 2px solid var(--accent);
+  background: rgba(224,182,84,0.07);
+  font-weight: 700;
+}
+/* keep column borders visible even on the coloured swatches */
+.metrics-table td.metric-avg.avg-red,
+.metrics-table td.metric-avg.avg-pink,
+.metrics-table td.metric-avg.avg-hotpink {
+  border-left: 2px solid var(--accent);
+  border-right: 2px solid var(--accent);
+}
