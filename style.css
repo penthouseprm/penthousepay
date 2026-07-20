@@ -1211,3 +1211,6 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
   border-left: 2px solid var(--accent);
   border-right: 2px solid var(--accent);
 }
+.metrics-table td.metric-avg.avg-red     { background: #d94a4a !important; color: #fff !important; }
+.metrics-table td.metric-avg.avg-pink    { background: #f4b8d0 !important; color: #4a1030 !important; }
+.metrics-table td.metric-avg.avg-hotpink { background: #ff2d92 !important; color: #fff !important; }
