@@ -1219,3 +1219,17 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 .metrics-table td.metric-avg.avg-red     { background: #d94a4a !important; color: #fff !important; }
 .metrics-table td.metric-avg.avg-pink    { background: #f4b8d0 !important; color: #4a1030 !important; }
 .metrics-table td.metric-avg.avg-hotpink { background: #ff2d92 !important; color: #fff !important; }
+
+/* ════════════ UPDATE 42: forgot password ════════════ */
+.auth-link {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 10px 0 0;
+  width: 100%;
+  text-align: center;
+  font-family: var(--font-body);
+}
+.auth-link:hover { color: var(--accent); text-decoration: underline; }

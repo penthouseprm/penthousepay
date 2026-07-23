@@ -32,6 +32,27 @@
         <input type="password" id="login-password" autocomplete="current-password" placeholder="••••••••">
       </label>
       <button id="btn-login" class="btn btn-primary btn-block" type="button">Log in</button>
+      <button id="link-forgot" class="auth-link" type="button">Forgot your password?</button>
+    </div>
+
+    <div id="forgot-form" class="auth-form hidden">
+      <p class="auth-note" style="margin-bottom: 14px;">Enter your email and we'll send you a link to set a new password.</p>
+      <label>Email
+        <input type="email" id="forgot-email" autocomplete="email" placeholder="you@example.com">
+      </label>
+      <button id="btn-send-reset" class="btn btn-primary btn-block" type="button">Send reset link</button>
+      <button id="link-back-login" class="auth-link" type="button">← Back to log in</button>
+    </div>
+
+    <div id="newpass-form" class="auth-form hidden">
+      <p class="auth-note" style="margin-bottom: 14px;">Choose a new password for your account.</p>
+      <label>New password
+        <input type="password" id="new-password" autocomplete="new-password" placeholder="Min. 6 characters">
+      </label>
+      <label>Confirm password
+        <input type="password" id="new-password2" autocomplete="new-password" placeholder="Repeat it">
+      </label>
+      <button id="btn-set-password" class="btn btn-primary btn-block" type="button">Update password</button>
     </div>
 
     <div id="signup-form" class="auth-form hidden">

@@ -7,6 +7,7 @@
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ── State ───────────────────────────────────────────────────
+let inPasswordRecovery = false;
 let currentUser = null;
 let currentProfile = null;
 let sheetMonth = startOfMonth(new Date());
@@ -157,6 +158,8 @@ $("tab-login").addEventListener("click", () => {
   $("tab-signup").classList.remove("active");
   $("login-form").classList.remove("hidden");
   $("signup-form").classList.add("hidden");
+  $("forgot-form").classList.add("hidden");
+  $("newpass-form").classList.add("hidden");
   clearAuthError();
 });
 
@@ -165,7 +168,75 @@ $("tab-signup").addEventListener("click", () => {
   $("tab-login").classList.remove("active");
   $("signup-form").classList.remove("hidden");
   $("login-form").classList.add("hidden");
+  $("forgot-form").classList.add("hidden");
+  $("newpass-form").classList.add("hidden");
   clearAuthError();
+});
+
+// ── forgot password ──
+$("link-forgot").addEventListener("click", () => {
+  clearAuthError();
+  $("login-form").classList.add("hidden");
+  $("signup-form").classList.add("hidden");
+  $("forgot-form").classList.remove("hidden");
+  $("forgot-email").value = $("login-email").value.trim();
+});
+
+$("link-back-login").addEventListener("click", () => {
+  clearAuthError();
+  $("forgot-form").classList.add("hidden");
+  $("login-form").classList.remove("hidden");
+});
+
+$("btn-send-reset").addEventListener("click", async () => {
+  clearAuthError();
+  const email = $("forgot-email").value.trim();
+  if (!email) { showAuthError("Enter your email address."); return; }
+
+  $("btn-send-reset").disabled = true;
+  const { error } = await db.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin,
+  });
+  $("btn-send-reset").disabled = false;
+
+  if (error) { showAuthError(error.message); return; }
+  // don't reveal whether the address exists
+  $("forgot-form").classList.add("hidden");
+  $("login-form").classList.remove("hidden");
+  toast("If that email is registered, a reset link is on its way. Check your inbox (and spam).");
+});
+
+// ── set a new password after following the emailed link ──
+
+db.auth.onAuthStateChange((event) => {
+  if (event === "PASSWORD_RECOVERY") {
+    inPasswordRecovery = true;
+    $("auth-view").classList.remove("hidden");
+    $("app-view").classList.add("hidden");
+    $("login-form").classList.add("hidden");
+    $("signup-form").classList.add("hidden");
+    $("forgot-form").classList.add("hidden");
+    $("newpass-form").classList.remove("hidden");
+  }
+});
+
+$("btn-set-password").addEventListener("click", async () => {
+  clearAuthError();
+  const p1 = $("new-password").value;
+  const p2 = $("new-password2").value;
+  if (p1.length < 6) { showAuthError("Password must be at least 6 characters."); return; }
+  if (p1 !== p2) { showAuthError("Passwords don't match."); return; }
+
+  $("btn-set-password").disabled = true;
+  const { error } = await db.auth.updateUser({ password: p1 });
+  $("btn-set-password").disabled = false;
+
+  if (error) { showAuthError(error.message); return; }
+  inPasswordRecovery = false;
+  $("newpass-form").classList.add("hidden");
+  $("login-form").classList.remove("hidden");
+  toast("Password updated ✓ You're logged in.");
+  init();
 });
 
 $("btn-login").addEventListener("click", async () => {
@@ -225,6 +296,19 @@ $("signup-password").addEventListener("keydown", (e) => {
 // INIT / ROUTING
 // ════════════════════════════════════════════════════════════
 async function init() {
+  // if the user arrived via a password-recovery link, keep them on the
+  // "set a new password" form instead of dropping them into the app
+  if (inPasswordRecovery || window.location.hash.includes("type=recovery")) {
+    $("auth-view").classList.remove("hidden");
+    $("app-view").classList.add("hidden");
+    $("login-form").classList.add("hidden");
+    $("signup-form").classList.add("hidden");
+    $("forgot-form").classList.add("hidden");
+    $("newpass-form").classList.remove("hidden");
+    inPasswordRecovery = true;
+    return;
+  }
+
   const { data: { session } } = await db.auth.getSession();
 
   if (!session) {
