@@ -21,6 +21,25 @@ let memberSheetTarget = null; // profile being edited by admin in payroll
 // ── Helpers ─────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 
+// ── Theme (light / dark) ──
+function applyTheme(theme) {
+  if (theme === "light") {
+    document.documentElement.setAttribute("data-theme", "light");
+    const b = $("btn-theme"); if (b) b.textContent = "☀️";
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+    const b = $("btn-theme"); if (b) b.textContent = "🌙";
+  }
+}
+// apply saved preference immediately (before first paint of the app)
+applyTheme(localStorage.getItem("pp-theme") || "dark");
+
+$("btn-theme").addEventListener("click", () => {
+  const next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+  localStorage.setItem("pp-theme", next);
+  applyTheme(next);
+});
+
 function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
 
 function monthLabel(d) {

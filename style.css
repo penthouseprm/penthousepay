@@ -29,6 +29,28 @@
   --font-body: "Inter", system-ui, sans-serif;
 }
 
+/* ── Light theme ── */
+[data-theme="light"] {
+  --bg: #F4F5F8;
+  --bg-raised: #FFFFFF;
+  --bg-row: #FFFFFF;
+  --bg-row-alt: #F6F7FA;
+  --border: #DDE1EA;
+  --text: #1A1E27;
+  --text-dim: #5C647A;
+  --accent: #B7891F;          /* deeper gold for contrast on white */
+  --accent-soft: rgba(183, 137, 31, 0.12);
+
+  --c-hours: #5C647A;
+  --c-of: #2C63C9;
+  --c-fv: #1E9E56;
+  --c-slushy: #7C4DD6;
+  --c-fansly: #1499A6;
+  --c-total: #D2453E;
+  --c-comm: #1E9E56;
+  --c-pay: #1E7A4E;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
@@ -811,6 +833,9 @@ td.cell-payout.paid { color: var(--c-fv); }
 input[type="date"] {
   color-scheme: dark;
 }
+[data-theme="light"] input[type="date"] {
+  color-scheme: light;
+}
 input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
 
 /* overtime popover anchored to the ⏱ icon */
@@ -1317,3 +1342,16 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 /* handle-only drag affordance */
 .drag-handle { cursor: grab; }
 .metric-chatter-row[draggable="true"] .drag-handle { cursor: grabbing; }
+
+/* ════════════ UPDATE 48: theme toggle ════════════ */
+.btn-icon {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  width: 36px; height: 36px;
+  font-size: 16px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  line-height: 1;
+}
+.btn-icon:hover { border-color: var(--accent); background: var(--accent-soft); }
