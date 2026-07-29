@@ -2849,7 +2849,7 @@ async function renderMetrics() {
     divider.dataset.dropTeam = g.id === null ? "" : g.id;
     divider.innerHTML = g.id === null
       ? `<td colspan="14">Unassigned</td>`
-      : `<td colspan="14">${g.name} <button class="metrics-team-del" data-del-metrics-team="${g.id}" title="Delete team">✕</button></td>`;
+      : `<td colspan="14"><span class="metrics-team-name">${g.name}</span> <button class="metrics-team-edit" data-edit-metrics-team="${g.id}" title="Rename team">✎</button> <button class="metrics-team-del" data-del-metrics-team="${g.id}" title="Delete team">✕</button></td>`;
     body.appendChild(divider);
 
     // chatters in this group, sorted by name
@@ -2908,6 +2908,23 @@ $("btn-add-metrics-team").addEventListener("click", async () => {
 });
 
 $("metrics-body").addEventListener("click", async (e) => {
+  // rename a team
+  const edit = e.target.closest("[data-edit-metrics-team]");
+  if (edit) {
+    const teamId = edit.dataset.editMetricsTeam;
+    const cell = edit.closest("td");
+    const current = cell.querySelector(".metrics-team-name").textContent;
+    const next = prompt("Rename team:", current);
+    if (next === null) return;
+    const name = next.trim();
+    if (!name) { toast("Team name can't be empty.", true); return; }
+    const { error } = await db.from("metrics_teams").update({ name }).eq("id", teamId);
+    if (error) { toast("Rename failed: " + error.message, true); return; }
+    toast("Team renamed ✓");
+    renderMetrics();
+    return;
+  }
+
   const del = e.target.closest("[data-del-metrics-team]");
   if (!del) return;
   if (!confirm("Delete this team? Chatters on it move back to Unassigned.")) return;

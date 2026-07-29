@@ -1249,3 +1249,10 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
   cursor: pointer; font-size: 12px; margin-left: 8px; opacity: 0.6;
 }
 .metrics-team-del:hover { opacity: 1; }
+
+/* ════════════ UPDATE 44: metrics team rename ════════════ */
+.metrics-team-edit {
+  background: none; border: none; color: var(--accent);
+  cursor: pointer; font-size: 12px; margin-left: 6px; opacity: 0.7;
+}
+.metrics-team-edit:hover { opacity: 1; }
