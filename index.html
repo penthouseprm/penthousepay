@@ -424,19 +424,23 @@
       <span class="metrics-key-note">Coaching Calls auto-seed from sales/hr each month; click a count to decrease, right-click to increase.</span>
     </div>
 
+    <div class="invite-row" style="margin-bottom: 16px;">
+      <input type="text" id="new-metrics-team" placeholder="New team name">
+      <button id="btn-add-metrics-team" class="btn btn-primary" type="button">+ Add Team</button>
+      <span class="hint">Drag a chatter's handle (⠿) to move them between teams.</span>
+    </div>
+
     <div class="table-scroll">
       <table class="sheet metrics-table" id="metrics-table">
         <thead>
           <tr>
+            <th class="metric-drag-th"></th>
             <th>Chatter</th>
             <th class="col-num">Total Sales $</th>
             <th class="col-num">Hours</th>
             <th class="col-num metric-avg-head">Avg $/hr</th>
             <th class="col-center">Coaching Calls</th>
-            <th class="col-center">GG Promotion Review</th>
             <th class="col-center">$100+ Spender Review</th>
-            <th class="col-center">Organic Promo Review</th>
-            <th class="col-center">Msg History</th>
             <th>Days 1–7</th>
             <th class="col-center">Impl?</th>
             <th>Days 8–15</th>

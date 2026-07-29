@@ -2735,7 +2735,6 @@ $("pay-month-next").addEventListener("click", () => {
 let metricsMonth = startOfMonth(new Date());
 
 const METRICS_COLORS = ["red", "pink", "hotpink"]; // avg cell colour cycle
-const REVIEW_COLS = ["gg_promo", "spender", "organic"]; // always start at 1
 
 function coachingSeed(avgPerHr) {
   if (avgPerHr >= 35) return 1;
@@ -2759,13 +2758,13 @@ async function renderMetrics() {
 
   const [
     { data: members, error: mErr },
-    { data: modelTeams, error: tErr },
-    { data: teamMembers, error: aErr },
+    { data: mTeams, error: tErr },
+    { data: mAssigns, error: aErr },
     { data: metricRows, error: rErr },
   ] = await Promise.all([
     db.from("profiles").select("*").order("name", { ascending: true }),
-    db.from("teams").select("*").order("created_at", { ascending: true }),
-    db.from("team_members").select("*"),
+    db.from("metrics_teams").select("*").order("sort", { ascending: true }),
+    db.from("metrics_team_members").select("*"),
     db.from("metrics").select("*").eq("month", mKey),
   ]);
 
@@ -2774,21 +2773,15 @@ async function renderMetrics() {
   body.innerHTML = "";
 
   if (mErr || tErr || aErr || rErr) {
-    body.innerHTML = `<tr><td colspan="17">Failed to load metrics.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="14">Failed to load metrics.</td></tr>`;
     return;
   }
 
   const chatters = realMembers(members).filter((m) => m.role === "member");
 
-  // model-team name per chatter (from Team Sales teams); a chatter may be on
-  // several — join names; default "Unassigned"
-  const teamNamesByUser = {};
-  (teamMembers || []).forEach((tm) => {
-    const t = (modelTeams || []).find((x) => x.id === tm.team_id);
-    if (!t) return;
-    (teamNamesByUser[tm.user_id] = teamNamesByUser[tm.user_id] || []).push(t.name);
-  });
-  const teamLabelOf = (uid) => (teamNamesByUser[uid] || []).join(", ") || "Unassigned";
+  // team id per chatter (admin-assigned via drag/drop); default = Unassigned
+  const teamOfUser = {};
+  (mAssigns || []).forEach((a) => { teamOfUser[a.user_id] = a.team_id; });
 
   // total sales + hours per chatter for the month
   const statByUser = {};
@@ -2803,85 +2796,89 @@ async function renderMetrics() {
   const existing = {};
   (metricRows || []).forEach((row) => { existing[row.user_id] = row; });
 
-  // order chatters by their (first) team name alphabetically, then chatter name;
-  // Unassigned last
-  const primaryTeam = (uid) => (teamNamesByUser[uid] || [])[0] || "~Unassigned";
-  chatters.sort((a, b) => {
-    const ta = primaryTeam(a.id), tb = primaryTeam(b.id);
-    if (ta !== tb) return ta.localeCompare(tb);
-    return (a.name || a.email).localeCompare(b.name || b.email);
-  });
+  // build the list of groups in display order: each team, then Unassigned
+  const groups = (mTeams || []).map((t) => ({ id: t.id, name: t.name }));
+  groups.push({ id: null, name: "Unassigned" });
 
   const toSeed = [];
-  let lastTeam = null;
 
-  chatters.forEach((m) => {
+  const chatterRowHtml = (m) => {
     const stat = statByUser[m.id] || { sales: 0, hours: 0 };
     const avg = stat.hours > 0 ? stat.sales / stat.hours : 0;
-    const teamName = teamLabelOf(m.id);
 
     let row = existing[m.id];
     if (!row) {
-      // seed a new metrics row for this month
       row = {
-        user_id: m.id,
-        month: mKey,
-        avg_color: null,
-        coaching: coachingSeed(avg),
-        gg_promo: 1,
-        spender: 1,
-        organic: 1,
-        msg_history: false,
-        fb1: "", fb1_impl: false,
-        fb2: "", fb2_impl: false,
-        fb3: "", fb3_impl: false,
-        fb4: "", fb4_impl: false,
+        user_id: m.id, month: mKey, avg_color: null,
+        coaching: coachingSeed(avg), spender: 1,
+        fb1: "", fb1_impl: false, fb2: "", fb2_impl: false,
+        fb3: "", fb3_impl: false, fb4: "", fb4_impl: false,
       };
       toSeed.push(row);
     }
 
-    // team divider row
-    if (teamName !== lastTeam) {
-      const divider = document.createElement("tr");
-      divider.className = "metrics-team-row";
-      divider.innerHTML = `<td colspan="17">${teamName}</td>`;
-      body.appendChild(divider);
-      lastTeam = teamName;
-    }
-
-    const tr = document.createElement("tr");
-    tr.dataset.metricUser = m.id;
     const cnt = (field, val) =>
       `<td class="col-center"><button class="metric-count ${countClass(val)}" data-count-field="${field}" data-count-user="${m.id}">${val} Remaining</button></td>`;
     const chk = (field, val) =>
       `<td class="col-center"><input type="checkbox" class="metric-check" data-check-field="${field}" data-check-user="${m.id}" ${val ? "checked" : ""}></td>`;
     const fb = (field, val) =>
       `<td><textarea class="metric-fb" data-fb-field="${field}" data-fb-user="${m.id}" rows="2" placeholder="–">${val || ""}</textarea></td>`;
-
     const hoursDisp = Math.round(stat.hours * 100) / 100;
 
-    tr.innerHTML = `
-      <td>${m.name || m.email}</td>
-      <td class="col-num">${fmt(stat.sales)}</td>
-      <td class="col-num">${hoursDisp}</td>
-      <td class="col-num metric-avg ${row.avg_color ? "avg-" + row.avg_color : ""}" data-avg-user="${m.id}" title="Click to set colour">${fmt(avg)}</td>
-      ${cnt("coaching", row.coaching)}
-      ${cnt("gg_promo", row.gg_promo)}
-      ${cnt("spender", row.spender)}
-      ${cnt("organic", row.organic)}
-      ${chk("msg_history", row.msg_history)}
-      ${fb("fb1", row.fb1)}${chk("fb1_impl", row.fb1_impl)}
-      ${fb("fb2", row.fb2)}${chk("fb2_impl", row.fb2_impl)}
-      ${fb("fb3", row.fb3)}${chk("fb3_impl", row.fb3_impl)}
-      ${fb("fb4", row.fb4)}${chk("fb4_impl", row.fb4_impl)}
+    return `
+      <tr class="metric-chatter-row" draggable="true" data-metric-user="${m.id}">
+        <td class="metric-drag"><span class="drag-handle" title="Drag to another team">⠿</span></td>
+        <td>${m.name || m.email}</td>
+        <td class="col-num">${fmt(stat.sales)}</td>
+        <td class="col-num">${hoursDisp}</td>
+        <td class="col-num metric-avg ${row.avg_color ? "avg-" + row.avg_color : ""}" data-avg-user="${m.id}" title="Click to set colour">${fmt(avg)}</td>
+        ${cnt("coaching", row.coaching)}
+        ${cnt("spender", row.spender)}
+        ${fb("fb1", row.fb1)}${chk("fb1_impl", row.fb1_impl)}
+        ${fb("fb2", row.fb2)}${chk("fb2_impl", row.fb2_impl)}
+        ${fb("fb3", row.fb3)}${chk("fb3_impl", row.fb3_impl)}
+        ${fb("fb4", row.fb4)}${chk("fb4_impl", row.fb4_impl)}
+      </tr>
     `;
-    body.appendChild(tr);
+  };
+
+  groups.forEach((g) => {
+    // team divider (drop target)
+    const divider = document.createElement("tr");
+    divider.className = "metrics-team-row";
+    divider.dataset.dropTeam = g.id === null ? "" : g.id;
+    divider.innerHTML = g.id === null
+      ? `<td colspan="14">Unassigned</td>`
+      : `<td colspan="14">${g.name} <button class="metrics-team-del" data-del-metrics-team="${g.id}" title="Delete team">✕</button></td>`;
+    body.appendChild(divider);
+
+    // chatters in this group, sorted by name
+    const inGroup = chatters
+      .filter((m) => (teamOfUser[m.id] || null) === g.id)
+      .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+
+    if (!inGroup.length) {
+      const empty = document.createElement("tr");
+      empty.className = "metrics-empty-row";
+      empty.dataset.dropTeam = g.id === null ? "" : g.id;
+      empty.innerHTML = `<td colspan="14" class="hint">Drop chatters here</td>`;
+      body.appendChild(empty);
+    } else {
+      inGroup.forEach((m) => {
+        const wrap = document.createElement("tbody");
+        wrap.innerHTML = chatterRowHtml(m);
+        const tr = wrap.firstElementChild;
+        tr.dataset.dropTeam = g.id === null ? "" : g.id;
+        body.appendChild(tr);
+      });
+    }
   });
 
-  // persist any freshly-seeded rows so counts lock in for the month
   if (toSeed.length) {
     await db.from("metrics").upsert(toSeed, { onConflict: "user_id,month" });
   }
+
+  wireMetricsDragDrop();
 }
 
 function countClass(v) {
@@ -2897,6 +2894,80 @@ async function saveMetric(userId, patch) {
     .eq("user_id", userId)
     .eq("month", bonusMonthKey(metricsMonth));
   if (error) toast("Metrics save failed: " + error.message, true);
+}
+
+// ── metrics teams: create / delete ──
+$("btn-add-metrics-team").addEventListener("click", async () => {
+  const name = $("new-metrics-team").value.trim();
+  if (!name) { toast("Enter a team name.", true); return; }
+  const { error } = await db.from("metrics_teams").insert({ name, sort: Date.now() });
+  if (error) { toast("Could not add team: " + error.message, true); return; }
+  $("new-metrics-team").value = "";
+  toast("Team added ✓");
+  renderMetrics();
+});
+
+$("metrics-body").addEventListener("click", async (e) => {
+  const del = e.target.closest("[data-del-metrics-team]");
+  if (!del) return;
+  if (!confirm("Delete this team? Chatters on it move back to Unassigned.")) return;
+  const teamId = del.dataset.delMetricsTeam;
+  // unassign its members, then delete the team
+  await db.from("metrics_team_members").delete().eq("team_id", teamId);
+  const { error } = await db.from("metrics_teams").delete().eq("id", teamId);
+  if (error) { toast("Could not delete team: " + error.message, true); return; }
+  toast("Team deleted");
+  renderMetrics();
+});
+
+// ── drag + drop chatters between teams ──
+let dragUserId = null;
+
+function wireMetricsDragDrop() {
+  const body = $("metrics-body");
+
+  body.querySelectorAll(".metric-chatter-row").forEach((tr) => {
+    tr.addEventListener("dragstart", (e) => {
+      dragUserId = tr.dataset.metricUser;
+      tr.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    tr.addEventListener("dragend", () => {
+      dragUserId = null;
+      tr.classList.remove("dragging");
+      body.querySelectorAll(".drop-hover").forEach((el) => el.classList.remove("drop-hover"));
+    });
+  });
+
+  // every row carries a data-drop-team; highlight the group on dragover
+  body.querySelectorAll("[data-drop-team]").forEach((el) => {
+    el.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      body.querySelectorAll(".drop-hover").forEach((x) => x.classList.remove("drop-hover"));
+      el.classList.add("drop-hover");
+    });
+    el.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      if (!dragUserId) return;
+      const teamId = el.dataset.dropTeam || null; // "" → Unassigned
+      await assignMetricsTeam(dragUserId, teamId);
+    });
+  });
+}
+
+async function assignMetricsTeam(userId, teamId) {
+  if (teamId === null || teamId === "") {
+    // move to Unassigned = remove any assignment
+    const { error } = await db.from("metrics_team_members").delete().eq("user_id", userId);
+    if (error) { toast("Move failed: " + error.message, true); return; }
+  } else {
+    // upsert on user_id (unique) so a chatter is only on one team
+    const { error } = await db.from("metrics_team_members")
+      .upsert({ user_id: userId, team_id: teamId }, { onConflict: "user_id" });
+    if (error) { toast("Move failed: " + error.message, true); return; }
+  }
+  renderMetrics();
 }
 
 // count decrement (click) / increment (right-click)
