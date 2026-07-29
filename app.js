@@ -2733,6 +2733,8 @@ $("pay-month-next").addEventListener("click", () => {
 // METRICS (admin)
 // ════════════════════════════════════════════════════════════
 let metricsMonth = startOfMonth(new Date());
+let metricsUnassignedOpen = false;
+let metricsTeamsCache = [];
 
 const METRICS_COLORS = ["red", "pink", "hotpink"]; // avg cell colour cycle
 
@@ -2779,9 +2781,11 @@ async function renderMetrics() {
 
   const chatters = realMembers(members).filter((m) => m.role === "member");
 
-  // team id per chatter (admin-assigned via drag/drop); default = Unassigned
-  const teamOfUser = {};
-  (mAssigns || []).forEach((a) => { teamOfUser[a.user_id] = a.team_id; });
+  // teams per chatter (a chatter may be on several — floaters)
+  const teamsOfUser = {};
+  (mAssigns || []).forEach((a) => {
+    (teamsOfUser[a.user_id] = teamsOfUser[a.user_id] || []).push(a.team_id);
+  });
 
   // total sales + hours per chatter for the month
   const statByUser = {};
@@ -2797,12 +2801,14 @@ async function renderMetrics() {
   (metricRows || []).forEach((row) => { existing[row.user_id] = row; });
 
   // build the list of groups in display order: each team, then Unassigned
+  metricsTeamsCache = (mTeams || []).map((t) => ({ id: t.id, name: t.name }));
   const groups = (mTeams || []).map((t) => ({ id: t.id, name: t.name }));
   groups.push({ id: null, name: "Unassigned" });
 
   const toSeed = [];
+  const seeded = new Set();
 
-  const chatterRowHtml = (m) => {
+  const chatterRowHtml = (m, groupId) => {
     const stat = statByUser[m.id] || { sales: 0, hours: 0 };
     const avg = stat.hours > 0 ? stat.sales / stat.hours : 0;
 
@@ -2814,7 +2820,7 @@ async function renderMetrics() {
         fb1: "", fb1_impl: false, fb2: "", fb2_impl: false,
         fb3: "", fb3_impl: false, fb4: "", fb4_impl: false,
       };
-      toSeed.push(row);
+      if (!seeded.has(m.id)) { toSeed.push(row); seeded.add(m.id); }
     }
 
     const cnt = (field, val) =>
@@ -2825,10 +2831,20 @@ async function renderMetrics() {
       `<td><textarea class="metric-fb" data-fb-field="${field}" data-fb-user="${m.id}" rows="2" placeholder="–">${val || ""}</textarea></td>`;
     const hoursDisp = Math.round(stat.hours * 100) / 100;
 
+    const teamCount = (teamsOfUser[m.id] || []).length;
+    const floaterBadge = teamCount > 1 ? ` <span class="floater-f" title="Floater — on ${teamCount} teams">F</span>` : "";
+    // controls shown under a real team: duplicate to another team + remove
+    const dupBtn = groupId
+      ? `<button class="metric-dup" data-dup-user="${m.id}" title="Add to another team (floater)">⧉</button>`
+      : "";
+    const removeBtn = groupId
+      ? `<button class="metric-remove" data-remove-user="${m.id}" data-remove-team="${groupId}" title="Remove from this team">✕</button>`
+      : "";
+
     return `
       <tr class="metric-chatter-row" draggable="true" data-metric-user="${m.id}">
-        <td class="metric-drag"><span class="drag-handle" title="Drag to another team">⠿</span></td>
-        <td>${m.name || m.email}</td>
+        <td class="metric-drag"><span class="drag-handle" title="Drag to add to a team">⠿</span></td>
+        <td>${m.name || m.email}${floaterBadge}${dupBtn}${removeBtn}</td>
         <td class="col-num">${fmt(stat.sales)}</td>
         <td class="col-num">${hoursDisp}</td>
         <td class="col-num metric-avg ${row.avg_color ? "avg-" + row.avg_color : ""}" data-avg-user="${m.id}" title="Click to set colour">${fmt(avg)}</td>
@@ -2843,32 +2859,46 @@ async function renderMetrics() {
   };
 
   groups.forEach((g) => {
-    // team divider (drop target)
+    const isUnassigned = g.id === null;
+
+    // chatters in this group
+    let inGroup;
+    if (isUnassigned) {
+      inGroup = chatters.filter((m) => !(teamsOfUser[m.id] || []).length);
+    } else {
+      inGroup = chatters.filter((m) => (teamsOfUser[m.id] || []).includes(g.id));
+    }
+    inGroup.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+
+    // divider (also a drop target)
     const divider = document.createElement("tr");
     divider.className = "metrics-team-row";
-    divider.dataset.dropTeam = g.id === null ? "" : g.id;
-    divider.innerHTML = g.id === null
-      ? `<td colspan="14">Unassigned</td>`
-      : `<td colspan="14"><span class="metrics-team-name">${g.name}</span> <button class="metrics-team-edit" data-edit-metrics-team="${g.id}" title="Rename team">✎</button> <button class="metrics-team-del" data-del-metrics-team="${g.id}" title="Delete team">✕</button></td>`;
+    divider.dataset.dropTeam = isUnassigned ? "" : g.id;
+    if (isUnassigned) {
+      divider.classList.add("metrics-unassigned-row");
+      divider.innerHTML = `<td colspan="14"><button class="unassigned-toggle" id="unassigned-toggle" type="button"><span class="team-chevron ${metricsUnassignedOpen ? "open" : ""}">▾</span> Unassigned (${inGroup.length})</button></td>`;
+    } else {
+      divider.innerHTML = `<td colspan="14"><span class="metrics-team-name">${g.name}</span> <button class="metrics-team-edit" data-edit-metrics-team="${g.id}" title="Rename team">✎</button> <button class="metrics-team-del" data-del-metrics-team="${g.id}" title="Delete team">✕</button></td>`;
+    }
     body.appendChild(divider);
 
-    // chatters in this group, sorted by name
-    const inGroup = chatters
-      .filter((m) => (teamOfUser[m.id] || null) === g.id)
-      .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+    // Unassigned rows only render when expanded
+    if (isUnassigned && !metricsUnassignedOpen) return;
 
     if (!inGroup.length) {
-      const empty = document.createElement("tr");
-      empty.className = "metrics-empty-row";
-      empty.dataset.dropTeam = g.id === null ? "" : g.id;
-      empty.innerHTML = `<td colspan="14" class="hint">Drop chatters here</td>`;
-      body.appendChild(empty);
+      if (!isUnassigned) {
+        const empty = document.createElement("tr");
+        empty.className = "metrics-empty-row";
+        empty.dataset.dropTeam = g.id;
+        empty.innerHTML = `<td colspan="14" class="hint">Drag or duplicate chatters here</td>`;
+        body.appendChild(empty);
+      }
     } else {
       inGroup.forEach((m) => {
         const wrap = document.createElement("tbody");
-        wrap.innerHTML = chatterRowHtml(m);
+        wrap.innerHTML = chatterRowHtml(m, g.id);
         const tr = wrap.firstElementChild;
-        tr.dataset.dropTeam = g.id === null ? "" : g.id;
+        tr.dataset.dropTeam = isUnassigned ? "" : g.id;
         body.appendChild(tr);
       });
     }
@@ -2908,6 +2938,51 @@ $("btn-add-metrics-team").addEventListener("click", async () => {
 });
 
 $("metrics-body").addEventListener("click", async (e) => {
+  // toggle unassigned section
+  if (e.target.closest("#unassigned-toggle")) {
+    metricsUnassignedOpen = !metricsUnassignedOpen;
+    renderMetrics();
+    return;
+  }
+
+  // duplicate a chatter to another team (floater)
+  const dup = e.target.closest("[data-dup-user]");
+  if (dup) {
+    e.stopPropagation();
+    document.querySelectorAll(".dup-menu").forEach((el) => el.remove());
+    const userId = dup.dataset.dupUser;
+    // teams this chatter isn't already on
+    const onTeams = Array.from($("metrics-body").querySelectorAll(`[data-metric-user="${userId}"]`))
+      .map((tr) => tr.dataset.dropTeam).filter(Boolean);
+    const available = metricsTeamsCache.filter((t) => !onTeams.includes(t.id));
+    if (!available.length) { toast("Already on every team.", true); return; }
+
+    const menu = document.createElement("div");
+    menu.className = "dup-menu";
+    menu.innerHTML = `<div class="dup-menu-title">Add to team…</div>` +
+      available.map((t) => `<button class="dup-menu-item" data-dup-team="${t.id}" data-dup-uid="${userId}">${t.name}</button>`).join("");
+    document.body.appendChild(menu);
+    const r = dup.getBoundingClientRect();
+    let left = r.left, top = r.bottom + 4;
+    if (left + menu.offsetWidth > window.innerWidth - 8) left = window.innerWidth - menu.offsetWidth - 8;
+    if (top + menu.offsetHeight > window.innerHeight - 8) top = r.top - menu.offsetHeight - 4;
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+    return;
+  }
+
+  // remove a chatter from one team
+  const rm = e.target.closest("[data-remove-user]");
+  if (rm) {
+    const { error } = await db.from("metrics_team_members")
+      .delete()
+      .eq("user_id", rm.dataset.removeUser)
+      .eq("team_id", rm.dataset.removeTeam);
+    if (error) { toast("Could not remove: " + error.message, true); return; }
+    renderMetrics();
+    return;
+  }
+
   // rename a team
   const edit = e.target.closest("[data-edit-metrics-team]");
   if (edit) {
@@ -2973,16 +3048,36 @@ function wireMetricsDragDrop() {
   });
 }
 
+// duplicate menu: pick a team → add chatter to it (floater)
+document.addEventListener("click", async (e) => {
+  const item = e.target.closest(".dup-menu-item");
+  if (item) {
+    e.stopPropagation();
+    const { error } = await db.from("metrics_team_members")
+      .insert({ user_id: item.dataset.dupUid, team_id: item.dataset.dupTeam });
+    document.querySelectorAll(".dup-menu").forEach((el) => el.remove());
+    if (error && error.code !== "23505") { toast("Could not add: " + error.message, true); return; }
+    toast("Added to team ✓");
+    renderMetrics();
+    return;
+  }
+  // click elsewhere closes any open dup menu
+  if (!e.target.closest("[data-dup-user]") && !e.target.closest(".dup-menu")) {
+    document.querySelectorAll(".dup-menu").forEach((el) => el.remove());
+  }
+});
+
 async function assignMetricsTeam(userId, teamId) {
   if (teamId === null || teamId === "") {
-    // move to Unassigned = remove any assignment
+    // dropped on Unassigned = remove from ALL teams
     const { error } = await db.from("metrics_team_members").delete().eq("user_id", userId);
     if (error) { toast("Move failed: " + error.message, true); return; }
   } else {
-    // upsert on user_id (unique) so a chatter is only on one team
+    // ADD to this team (keeps any existing memberships → floaters).
+    // unique(team_id,user_id) prevents duplicates; ignore that specific error.
     const { error } = await db.from("metrics_team_members")
-      .upsert({ user_id: userId, team_id: teamId }, { onConflict: "user_id" });
-    if (error) { toast("Move failed: " + error.message, true); return; }
+      .insert({ user_id: userId, team_id: teamId });
+    if (error && error.code !== "23505") { toast("Move failed: " + error.message, true); return; }
   }
   renderMetrics();
 }

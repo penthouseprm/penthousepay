@@ -1256,3 +1256,57 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
   cursor: pointer; font-size: 12px; margin-left: 6px; opacity: 0.7;
 }
 .metrics-team-edit:hover { opacity: 1; }
+
+/* ════════════ UPDATE 45: floater badge + per-team remove ════════════ */
+.floater-f {
+  display: inline-block;
+  font-size: 10px; font-weight: 800;
+  width: 16px; height: 16px; line-height: 16px; text-align: center;
+  border-radius: 4px;
+  background: rgba(63,211,224,0.18);
+  color: var(--c-fansly);
+  border: 1px solid rgba(63,211,224,0.5);
+  margin-left: 6px; vertical-align: middle;
+}
+.metric-remove {
+  background: none; border: none; color: var(--c-total);
+  cursor: pointer; font-size: 11px; margin-left: 8px; opacity: 0;
+  transition: opacity 0.12s;
+}
+.metric-chatter-row:hover .metric-remove { opacity: 0.6; }
+.metric-remove:hover { opacity: 1 !important; }
+
+/* ════════════ UPDATE 46: unassigned collapse + duplicate menu ════════════ */
+.unassigned-toggle {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-display); font-weight: 700;
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--accent); display: inline-flex; align-items: center; gap: 6px;
+}
+.metrics-unassigned-row td { background: var(--bg-row) !important; }
+
+.metric-dup {
+  background: none; border: none; color: var(--c-fansly);
+  cursor: pointer; font-size: 12px; margin-left: 8px; opacity: 0;
+  transition: opacity 0.12s;
+}
+.metric-chatter-row:hover .metric-dup { opacity: 0.7; }
+.metric-dup:hover { opacity: 1 !important; }
+
+.dup-menu {
+  position: fixed; z-index: 200;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: 10px; padding: 6px; min-width: 160px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5); animation: banner-in 0.15s ease;
+}
+.dup-menu-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-dim); padding: 4px 8px 6px;
+}
+.dup-menu-item {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; color: var(--text);
+  padding: 7px 8px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  font-family: var(--font-body);
+}
+.dup-menu-item:hover { background: var(--accent-soft); color: var(--accent); }
