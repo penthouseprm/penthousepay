@@ -1239,7 +1239,8 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 .metric-drag { text-align: center; width: 30px; }
 .drag-handle { cursor: grab; color: var(--text-dim); font-size: 15px; user-select: none; }
 .drag-handle:active { cursor: grabbing; }
-.metric-chatter-row.dragging { opacity: 0.4; }
+.metric-chatter-row.dragging { opacity: 0.5; background: var(--accent-soft); }
+.metric-chatter-row.dragging td { background: var(--accent-soft) !important; }
 .metrics-team-row.drop-hover td,
 .metrics-empty-row.drop-hover td,
 .metric-chatter-row.drop-hover td { box-shadow: inset 0 3px 0 var(--accent); }
@@ -1312,5 +1313,7 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 .dup-menu-item:hover { background: var(--accent-soft); color: var(--accent); }
 
 /* ════════════ UPDATE 47: reorder within team ════════════ */
-.metric-chatter-row.drop-before td { box-shadow: inset 0 3px 0 var(--accent); }
-.metric-chatter-row.drop-after td { box-shadow: inset 0 -3px 0 var(--accent); }
+
+/* handle-only drag affordance */
+.drag-handle { cursor: grab; }
+.metric-chatter-row[draggable="true"] .drag-handle { cursor: grabbing; }

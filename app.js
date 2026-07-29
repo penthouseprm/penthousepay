@@ -2782,12 +2782,17 @@ async function renderMetrics() {
   const chatters = realMembers(members).filter((m) => m.role === "member");
 
   // teams per chatter (a chatter may be on several — floaters)
-  // also keep the sort position of each (user,team) assignment
+  // also keep the sort position of each (user,team) assignment.
+  // de-dupe defensively in case a stray duplicate assignment exists.
   const teamsOfUser = {};
   const sortOfAssign = {}; // key: userId+":"+teamId → sort
+  const seenAssign = new Set();
   (mAssigns || []).forEach((a) => {
+    const key = a.user_id + ":" + a.team_id;
+    if (seenAssign.has(key)) return;
+    seenAssign.add(key);
     (teamsOfUser[a.user_id] = teamsOfUser[a.user_id] || []).push(a.team_id);
-    sortOfAssign[a.user_id + ":" + a.team_id] = a.sort == null ? 0 : a.sort;
+    sortOfAssign[key] = a.sort == null ? 0 : a.sort;
   });
 
   // total sales + hours per chatter for the month
@@ -2845,8 +2850,8 @@ async function renderMetrics() {
       : "";
 
     return `
-      <tr class="metric-chatter-row" draggable="true" data-metric-user="${m.id}">
-        <td class="metric-drag"><span class="drag-handle" title="Drag to add to a team">⠿</span></td>
+      <tr class="metric-chatter-row" data-metric-user="${m.id}">
+        <td class="metric-drag"><span class="drag-handle" title="Drag to reorder or move team">⠿</span></td>
         <td>${m.name || m.email}${floaterBadge}${dupBtn}${removeBtn}</td>
         <td class="col-num">${fmt(stat.sales)}</td>
         <td class="col-num">${hoursDisp}</td>
@@ -3026,114 +3031,156 @@ $("metrics-body").addEventListener("click", async (e) => {
   renderMetrics();
 });
 
-// ── drag + drop chatters between/within teams ──
+// ── drag + drop chatters (handle-only, live DOM move) ──
 let dragUserId = null;
+let dragRow = null;
 
 function wireMetricsDragDrop() {
   const body = $("metrics-body");
 
+  // only the ⠿ handle initiates a drag (so textareas/buttons work normally)
+  body.querySelectorAll(".drag-handle").forEach((h) => {
+    h.addEventListener("mousedown", () => {
+      const tr = h.closest(".metric-chatter-row");
+      if (tr) tr.setAttribute("draggable", "true");
+    });
+  });
+  // if the mousedown wasn't on a handle, make sure rows aren't draggable
   body.querySelectorAll(".metric-chatter-row").forEach((tr) => {
+    tr.addEventListener("mousedown", (e) => {
+      if (!e.target.closest(".drag-handle")) tr.removeAttribute("draggable");
+    });
+
     tr.addEventListener("dragstart", (e) => {
       dragUserId = tr.dataset.metricUser;
+      dragRow = tr;
       tr.classList.add("dragging");
       e.dataTransfer.effectAllowed = "move";
+      // some browsers need data set to allow dragging
+      try { e.dataTransfer.setData("text/plain", dragUserId); } catch (_) {}
     });
     tr.addEventListener("dragend", () => {
-      dragUserId = null;
       tr.classList.remove("dragging");
+      tr.removeAttribute("draggable");
       body.querySelectorAll(".drop-hover").forEach((el) => el.classList.remove("drop-hover"));
-      body.querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
+      commitDragOrder();          // persist wherever it ended up
+      dragUserId = null; dragRow = null;
     });
   });
 
-  // which team a vertical position belongs to (nearest divider at/above y)
-  function teamAtY(y) {
+  // which team divider owns a vertical position (nearest at/above y)
+  function dividerAtY(y) {
     const dividers = Array.from(body.querySelectorAll(".metrics-team-row"));
     let current = null;
     for (const d of dividers) {
-      const top = d.getBoundingClientRect().top;
-      if (top - 4 <= y) current = d.dataset.dropTeam || null;
+      if (d.getBoundingClientRect().top - 4 <= y) current = d;
       else break;
     }
     return current;
   }
 
-  // the chatter row within a team that the pointer is over/nearest, plus
-  // whether to drop before or after it
-  function rowTargetAtY(teamKey, y) {
-    const rows = Array.from(body.querySelectorAll(`.metric-chatter-row[data-drop-team="${teamKey}"]`));
+  // the chatter row we should insert before, given a Y within a team
+  function rowBeforeAtY(teamKey, y) {
+    const rows = Array.from(body.querySelectorAll(`.metric-chatter-row[data-drop-team="${teamKey}"]`))
+      .filter((r) => r !== dragRow);
     for (const r of rows) {
       const rect = r.getBoundingClientRect();
-      if (y < rect.top + rect.height / 2) return { row: r, before: true };
-      if (y < rect.bottom) return { row: r, before: false };
+      if (y < rect.top + rect.height / 2) return r;
     }
-    return { row: rows[rows.length - 1] || null, before: false };
-  }
-
-  function clearMarkers() {
-    body.querySelectorAll(".drop-hover").forEach((x) => x.classList.remove("drop-hover"));
-    body.querySelectorAll(".drop-before, .drop-after").forEach((x) => x.classList.remove("drop-before", "drop-after"));
+    return null; // append at end
   }
 
   body.addEventListener("dragover", (e) => {
-    if (!dragUserId) return;
+    if (!dragRow) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    const teamId = teamAtY(e.clientY);
-    const key = teamId === null ? "" : teamId;
-    clearMarkers();
-    // highlight the team block
-    body.querySelectorAll(`[data-drop-team="${key}"]`).forEach((el) => el.classList.add("drop-hover"));
-    // show an insertion line on the nearest row
-    const tgt = rowTargetAtY(key, e.clientY);
-    if (tgt.row && tgt.row.dataset.metricUser !== dragUserId) {
-      tgt.row.classList.add(tgt.before ? "drop-before" : "drop-after");
+
+    const divider = dividerAtY(e.clientY);
+    const teamKey = divider ? (divider.dataset.dropTeam || "") : "";
+
+    body.querySelectorAll(".drop-hover").forEach((el) => el.classList.remove("drop-hover"));
+    body.querySelectorAll(`[data-drop-team="${teamKey}"]`).forEach((el) => el.classList.add("drop-hover"));
+
+    // live-move the dragged row into position in the DOM
+    dragRow.dataset.dropTeam = teamKey;
+    const before = rowBeforeAtY(teamKey, e.clientY);
+    if (before) {
+      body.insertBefore(dragRow, before);
+    } else {
+      // place after the last row of this team (or right after its divider if empty)
+      const rows = Array.from(body.querySelectorAll(`.metric-chatter-row[data-drop-team="${teamKey}"]`))
+        .filter((r) => r !== dragRow);
+      if (rows.length) {
+        rows[rows.length - 1].after(dragRow);
+      } else if (divider) {
+        divider.after(dragRow);
+      }
     }
   });
 
-  body.addEventListener("drop", async (e) => {
-    e.preventDefault();
-    if (!dragUserId) return;
-    const teamId = teamAtY(e.clientY);
-    const key = teamId === null ? "" : teamId;
-    const tgt = rowTargetAtY(key, e.clientY);
-    clearMarkers();
-
-    // build the new ordered list of user ids for this team
-    const rows = Array.from(body.querySelectorAll(`.metric-chatter-row[data-drop-team="${key}"]`));
-    let ids = rows.map((r) => r.dataset.metricUser).filter((id) => id !== dragUserId);
-    let idx = ids.length;
-    if (tgt.row) {
-      const anchor = tgt.row.dataset.metricUser;
-      const pos = ids.indexOf(anchor);
-      if (pos !== -1) idx = tgt.before ? pos : pos + 1;
-    }
-    ids.splice(idx, 0, dragUserId);
-
-    await placeInMetricsTeam(dragUserId, teamId, ids);
+  body.addEventListener("drop", (e) => {
+    if (dragRow) e.preventDefault(); // actual persist happens in dragend→commit
   });
 }
 
-// add/move a chatter into a team at a given order, persisting sort for all rows
-async function placeInMetricsTeam(userId, teamId, orderedIds) {
+// read the current DOM order and persist team membership + sort for the moved chatter
+async function commitDragOrder() {
+  if (!dragRow || !dragUserId) return;
+  const body = $("metrics-body");
+  const teamKey = dragRow.dataset.dropTeam || "";
+  const teamId = teamKey === "" ? null : teamKey;
+  const userId = dragUserId;
+
   if (teamId === null) {
-    // dropped in Unassigned = remove from all teams
+    // landed in Unassigned → remove from all teams
     const { error } = await db.from("metrics_team_members").delete().eq("user_id", userId);
-    if (error) { toast("Move failed: " + error.message, true); return; }
+    if (error) { toast("Move failed: " + error.message, true); renderMetrics(); return; }
     renderMetrics();
     return;
   }
-  // ensure the dragged chatter is a member of this team
+
+  // ensure membership (no-op if already a member)
   const { error: upErr } = await db.from("metrics_team_members")
     .upsert({ user_id: userId, team_id: teamId }, { onConflict: "team_id,user_id" });
-  if (upErr && upErr.code !== "23505") { toast("Move failed: " + upErr.message, true); return; }
+  if (upErr && upErr.code !== "23505") { toast("Move failed: " + upErr.message, true); renderMetrics(); return; }
 
-  // write the new sort order for every member of the team
-  const updates = orderedIds.map((uid, i) =>
+  // persist the new order for this team from the live DOM
+  const ids = Array.from(body.querySelectorAll(`.metric-chatter-row[data-drop-team="${teamKey}"]`))
+    .map((r) => r.dataset.metricUser);
+  const updates = ids.map((uid, i) =>
     db.from("metrics_team_members").update({ sort: i }).eq("team_id", teamId).eq("user_id", uid)
   );
-  await Promise.all(updates);
-  renderMetrics();
+  const results = await Promise.all(updates);
+  const failed = results.find((r) => r.error);
+  if (failed) { toast("Order not fully saved — refreshing.", true); renderMetrics(); }
+  // no re-render on success: the DOM already reflects the final state
+  // update floater badges live in case membership changed
+  refreshFloaterBadges();
+}
+
+// recompute the cyan F badges without a full reload
+function refreshFloaterBadges() {
+  const body = $("metrics-body");
+  const counts = {};
+  body.querySelectorAll(".metric-chatter-row").forEach((r) => {
+    const id = r.dataset.metricUser;
+    if ((r.dataset.dropTeam || "") !== "") counts[id] = (counts[id] || 0) + 1;
+  });
+  body.querySelectorAll(".metric-chatter-row").forEach((r) => {
+    const id = r.dataset.metricUser;
+    const nameCell = r.children[1];
+    const existing = nameCell.querySelector(".floater-f");
+    const isFloater = (counts[id] || 0) > 1;
+    if (isFloater && !existing) {
+      const b = document.createElement("span");
+      b.className = "floater-f";
+      b.title = "Floater — on multiple teams";
+      b.textContent = "F";
+      nameCell.insertBefore(b, nameCell.querySelector(".metric-dup") || null);
+    } else if (!isFloater && existing) {
+      existing.remove();
+    }
+  });
 }
 
 // duplicate menu: pick a team → add chatter to it (floater)
