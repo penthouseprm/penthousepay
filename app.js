@@ -3031,20 +3031,44 @@ function wireMetricsDragDrop() {
     });
   });
 
-  // every row carries a data-drop-team; highlight the group on dragover
-  body.querySelectorAll("[data-drop-team]").forEach((el) => {
-    el.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      body.querySelectorAll(".drop-hover").forEach((x) => x.classList.remove("drop-hover"));
-      el.classList.add("drop-hover");
-    });
-    el.addEventListener("drop", async (e) => {
-      e.preventDefault();
-      if (!dragUserId) return;
-      const teamId = el.dataset.dropTeam || null; // "" → Unassigned
-      await assignMetricsTeam(dragUserId, teamId);
-    });
+  // Resolve which team a vertical position belongs to: the team whose divider
+  // is the closest one at or above the pointer. Fixes drops on a team's last
+  // row landing in the next team.
+  function teamAtY(y) {
+    const dividers = Array.from(body.querySelectorAll(".metrics-team-row"));
+    let current = null;
+    for (const d of dividers) {
+      const top = d.getBoundingClientRect().top;
+      if (top - 4 <= y) {
+        current = d.dataset.dropTeam || null; // "" → Unassigned
+      } else {
+        break;
+      }
+    }
+    return { teamId: current };
+  }
+
+  function highlightTeam(teamId) {
+    body.querySelectorAll(".drop-hover").forEach((x) => x.classList.remove("drop-hover"));
+    const key = teamId === null ? "" : teamId;
+    body.querySelectorAll(`[data-drop-team="${key}"]`).forEach((el) => el.classList.add("drop-hover"));
+  }
+
+  body.addEventListener("dragover", (e) => {
+    if (!dragUserId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const t = teamAtY(e.clientY);
+    if (t) highlightTeam(t.teamId);
+  });
+
+  body.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    if (!dragUserId) return;
+    const t = teamAtY(e.clientY);
+    body.querySelectorAll(".drop-hover").forEach((x) => x.classList.remove("drop-hover"));
+    if (!t) return;
+    await assignMetricsTeam(dragUserId, t.teamId);
   });
 }
 
