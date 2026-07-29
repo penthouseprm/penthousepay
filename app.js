@@ -2782,9 +2782,12 @@ async function renderMetrics() {
   const chatters = realMembers(members).filter((m) => m.role === "member");
 
   // teams per chatter (a chatter may be on several — floaters)
+  // also keep the sort position of each (user,team) assignment
   const teamsOfUser = {};
+  const sortOfAssign = {}; // key: userId+":"+teamId → sort
   (mAssigns || []).forEach((a) => {
     (teamsOfUser[a.user_id] = teamsOfUser[a.user_id] || []).push(a.team_id);
+    sortOfAssign[a.user_id + ":" + a.team_id] = a.sort == null ? 0 : a.sort;
   });
 
   // total sales + hours per chatter for the month
@@ -2868,7 +2871,18 @@ async function renderMetrics() {
     } else {
       inGroup = chatters.filter((m) => (teamsOfUser[m.id] || []).includes(g.id));
     }
-    inGroup.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+    // teams: order by saved sort position (drag to reorder); ties by name.
+    // Unassigned: alphabetical.
+    if (isUnassigned) {
+      inGroup.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+    } else {
+      inGroup.sort((a, b) => {
+        const sa = sortOfAssign[a.id + ":" + g.id] ?? 0;
+        const sb = sortOfAssign[b.id + ":" + g.id] ?? 0;
+        if (sa !== sb) return sa - sb;
+        return (a.name || a.email).localeCompare(b.name || b.email);
+      });
+    }
 
     // divider (also a drop target)
     const divider = document.createElement("tr");
@@ -3012,7 +3026,7 @@ $("metrics-body").addEventListener("click", async (e) => {
   renderMetrics();
 });
 
-// ── drag + drop chatters between teams ──
+// ── drag + drop chatters between/within teams ──
 let dragUserId = null;
 
 function wireMetricsDragDrop() {
@@ -3028,48 +3042,98 @@ function wireMetricsDragDrop() {
       dragUserId = null;
       tr.classList.remove("dragging");
       body.querySelectorAll(".drop-hover").forEach((el) => el.classList.remove("drop-hover"));
+      body.querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
     });
   });
 
-  // Resolve which team a vertical position belongs to: the team whose divider
-  // is the closest one at or above the pointer. Fixes drops on a team's last
-  // row landing in the next team.
+  // which team a vertical position belongs to (nearest divider at/above y)
   function teamAtY(y) {
     const dividers = Array.from(body.querySelectorAll(".metrics-team-row"));
     let current = null;
     for (const d of dividers) {
       const top = d.getBoundingClientRect().top;
-      if (top - 4 <= y) {
-        current = d.dataset.dropTeam || null; // "" → Unassigned
-      } else {
-        break;
-      }
+      if (top - 4 <= y) current = d.dataset.dropTeam || null;
+      else break;
     }
-    return { teamId: current };
+    return current;
   }
 
-  function highlightTeam(teamId) {
+  // the chatter row within a team that the pointer is over/nearest, plus
+  // whether to drop before or after it
+  function rowTargetAtY(teamKey, y) {
+    const rows = Array.from(body.querySelectorAll(`.metric-chatter-row[data-drop-team="${teamKey}"]`));
+    for (const r of rows) {
+      const rect = r.getBoundingClientRect();
+      if (y < rect.top + rect.height / 2) return { row: r, before: true };
+      if (y < rect.bottom) return { row: r, before: false };
+    }
+    return { row: rows[rows.length - 1] || null, before: false };
+  }
+
+  function clearMarkers() {
     body.querySelectorAll(".drop-hover").forEach((x) => x.classList.remove("drop-hover"));
-    const key = teamId === null ? "" : teamId;
-    body.querySelectorAll(`[data-drop-team="${key}"]`).forEach((el) => el.classList.add("drop-hover"));
+    body.querySelectorAll(".drop-before, .drop-after").forEach((x) => x.classList.remove("drop-before", "drop-after"));
   }
 
   body.addEventListener("dragover", (e) => {
     if (!dragUserId) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    const t = teamAtY(e.clientY);
-    if (t) highlightTeam(t.teamId);
+    const teamId = teamAtY(e.clientY);
+    const key = teamId === null ? "" : teamId;
+    clearMarkers();
+    // highlight the team block
+    body.querySelectorAll(`[data-drop-team="${key}"]`).forEach((el) => el.classList.add("drop-hover"));
+    // show an insertion line on the nearest row
+    const tgt = rowTargetAtY(key, e.clientY);
+    if (tgt.row && tgt.row.dataset.metricUser !== dragUserId) {
+      tgt.row.classList.add(tgt.before ? "drop-before" : "drop-after");
+    }
   });
 
   body.addEventListener("drop", async (e) => {
     e.preventDefault();
     if (!dragUserId) return;
-    const t = teamAtY(e.clientY);
-    body.querySelectorAll(".drop-hover").forEach((x) => x.classList.remove("drop-hover"));
-    if (!t) return;
-    await assignMetricsTeam(dragUserId, t.teamId);
+    const teamId = teamAtY(e.clientY);
+    const key = teamId === null ? "" : teamId;
+    const tgt = rowTargetAtY(key, e.clientY);
+    clearMarkers();
+
+    // build the new ordered list of user ids for this team
+    const rows = Array.from(body.querySelectorAll(`.metric-chatter-row[data-drop-team="${key}"]`));
+    let ids = rows.map((r) => r.dataset.metricUser).filter((id) => id !== dragUserId);
+    let idx = ids.length;
+    if (tgt.row) {
+      const anchor = tgt.row.dataset.metricUser;
+      const pos = ids.indexOf(anchor);
+      if (pos !== -1) idx = tgt.before ? pos : pos + 1;
+    }
+    ids.splice(idx, 0, dragUserId);
+
+    await placeInMetricsTeam(dragUserId, teamId, ids);
   });
+}
+
+// add/move a chatter into a team at a given order, persisting sort for all rows
+async function placeInMetricsTeam(userId, teamId, orderedIds) {
+  if (teamId === null) {
+    // dropped in Unassigned = remove from all teams
+    const { error } = await db.from("metrics_team_members").delete().eq("user_id", userId);
+    if (error) { toast("Move failed: " + error.message, true); return; }
+    renderMetrics();
+    return;
+  }
+  // ensure the dragged chatter is a member of this team
+  const { error: upErr } = await db.from("metrics_team_members")
+    .upsert({ user_id: userId, team_id: teamId }, { onConflict: "team_id,user_id" });
+  if (upErr && upErr.code !== "23505") { toast("Move failed: " + upErr.message, true); return; }
+
+  // write the new sort order for every member of the team
+  const updates = orderedIds.map((uid, i) =>
+    db.from("metrics_team_members").update({ sort: i }).eq("team_id", teamId).eq("user_id", uid)
+  );
+  await Promise.all(updates);
+  renderMetrics();
 }
 
 // duplicate menu: pick a team → add chatter to it (floater)
@@ -3090,21 +3154,6 @@ document.addEventListener("click", async (e) => {
     document.querySelectorAll(".dup-menu").forEach((el) => el.remove());
   }
 });
-
-async function assignMetricsTeam(userId, teamId) {
-  if (teamId === null || teamId === "") {
-    // dropped on Unassigned = remove from ALL teams
-    const { error } = await db.from("metrics_team_members").delete().eq("user_id", userId);
-    if (error) { toast("Move failed: " + error.message, true); return; }
-  } else {
-    // ADD to this team (keeps any existing memberships → floaters).
-    // unique(team_id,user_id) prevents duplicates; ignore that specific error.
-    const { error } = await db.from("metrics_team_members")
-      .insert({ user_id: userId, team_id: teamId });
-    if (error && error.code !== "23505") { toast("Move failed: " + error.message, true); return; }
-  }
-  renderMetrics();
-}
 
 // count decrement (click) / increment (right-click)
 $("metrics-body").addEventListener("click", async (e) => {

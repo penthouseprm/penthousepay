@@ -1310,3 +1310,7 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
   font-family: var(--font-body);
 }
 .dup-menu-item:hover { background: var(--accent-soft); color: var(--accent); }
+
+/* ════════════ UPDATE 47: reorder within team ════════════ */
+.metric-chatter-row.drop-before td { box-shadow: inset 0 3px 0 var(--accent); }
+.metric-chatter-row.drop-after td { box-shadow: inset 0 -3px 0 var(--accent); }
