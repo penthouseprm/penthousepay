@@ -1167,7 +1167,10 @@ async function renderTeam() {
 
     const isSelf = m.id === currentUser.id;
     const isDeactivated = m.active === false;
-    const canEdit = isSuperAdmin(currentProfile);
+    // super admin can edit anyone; a regular admin can edit chatters &
+    // non-chatters (not other admins or super admins)
+    const canEdit = isSuperAdmin(currentProfile)
+      || (isAdminUser(currentProfile) && (m.role === "member" || m.role === "non_chatter"));
     const editBtn = canEdit ? `<button class="btn btn-ghost btn-small" data-edit-member="${m.id}" type="button">Edit</button>` : "";
     const firedBadge = m.fired ? ` <span class="fired-badge">FIRED</span>` : "";
     const deactivatedBadge = isDeactivated ? ` <span class="deactivated-badge">DEACTIVATED</span>` : "";
@@ -1210,11 +1213,18 @@ $("members-body").addEventListener("click", async (e) => {
     if (!m) return;
     const tr = $("members-body").querySelector(`tr[data-member-row="${m.id}"]`);
     if (!tr) return;
-    const roleOptions = ["member", "non_chatter", "admin"]
+    // super admin may set Admin; a regular admin can only toggle Chatter/Non-Chatter
+    const roleChoices = isSuperAdmin(currentProfile)
+      ? ["member", "non_chatter", "admin"]
+      : ["member", "non_chatter"];
+    const roleOptions = roleChoices
       .map((r) => `<option value="${r}" ${m.role === r ? "selected" : ""}>${roleLabel(r)}</option>`)
       .join("");
-    const roleCell = m.role === "super_admin"
-      ? `<td><span class="role-pill super_admin">${roleLabel(m.role)}</span></td>`
+    // an admin editing another admin can't change their role (shouldn't reach
+    // here, but guard anyway) → show a static pill
+    const roleEditable = isSuperAdmin(currentProfile) || (m.role === "member" || m.role === "non_chatter");
+    const roleCell = (m.role === "super_admin" || !roleEditable)
+      ? `<td><span class="role-pill ${m.role}">${roleLabel(m.role)}</span></td>`
       : `<td><select class="edit-field" data-edit-role>${roleOptions}</select></td>`;
 
     tr.innerHTML = `
