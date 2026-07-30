@@ -1087,6 +1087,23 @@ document.addEventListener("click", (e) => {
 // ════════════════════════════════════════════════════════════
 // TEAM (admin)
 // ════════════════════════════════════════════════════════════
+// When a member's role changes, remove assignments that no longer apply.
+// Chatter concepts (model teams, manager teams, metrics teams) don't apply to
+// non-chatters/admins, so clear them when leaving the Chatter role.
+async function applyRoleCleanup(userId, newRole) {
+  if (newRole !== "member") {
+    // no longer a chatter → pull them out of all chatter-only groupings
+    await Promise.all([
+      db.from("team_members").delete().eq("user_id", userId),          // model/sales teams
+      db.from("manager_team_members").delete().eq("user_id", userId),  // manager teams
+      db.from("metrics_team_members").delete().eq("user_id", userId),  // metrics teams
+    ]);
+  }
+  // → member (Chatter): nothing to remove; they can be re-added to teams as needed.
+  // Timesheets, bonuses, payroll, metrics rows all read role live, so those
+  // views update themselves on next load — no data migration needed.
+}
+
 async function renderTeam() {
   const { data: invites, error: invErr } = await db
     .from("invites")
@@ -1193,11 +1210,18 @@ $("members-body").addEventListener("click", async (e) => {
     if (!m) return;
     const tr = $("members-body").querySelector(`tr[data-member-row="${m.id}"]`);
     if (!tr) return;
+    const roleOptions = ["member", "non_chatter", "admin"]
+      .map((r) => `<option value="${r}" ${m.role === r ? "selected" : ""}>${roleLabel(r)}</option>`)
+      .join("");
+    const roleCell = m.role === "super_admin"
+      ? `<td><span class="role-pill super_admin">${roleLabel(m.role)}</span></td>`
+      : `<td><select class="edit-field" data-edit-role>${roleOptions}</select></td>`;
+
     tr.innerHTML = `
       <td><input class="edit-field" data-edit-name value="${m.name || ""}" placeholder="Name"></td>
       <td><input class="edit-field" data-edit-email type="email" value="${m.email}" placeholder="email@example.com"></td>
-      <td><span class="role-pill ${m.role}">${roleLabel(m.role)}</span></td>
-      <td colspan="3"><span class="hint">Editing name &amp; email — changing the email also changes their login</span></td>
+      ${roleCell}
+      <td colspan="3"><span class="hint">Editing name, email &amp; role — changing the email also changes their login</span></td>
       <td class="actions-cell">
         <button class="btn btn-primary btn-small" data-save-member="${m.id}" type="button">Save</button>
         <button class="btn btn-ghost btn-small" data-cancel-edit type="button">Cancel</button>
@@ -1210,17 +1234,33 @@ $("members-body").addEventListener("click", async (e) => {
   const saveBtn = e.target.closest("[data-save-member]");
   if (saveBtn) {
     const tr = saveBtn.closest("tr");
+    const memberId = saveBtn.dataset.saveMember;
+    const m = membersCache.find((x) => x.id === memberId);
     const newName = tr.querySelector("[data-edit-name]").value.trim();
     const newEmail = tr.querySelector("[data-edit-email]").value.trim().toLowerCase();
+    const roleSel = tr.querySelector("[data-edit-role]");
+    const newRole = roleSel ? roleSel.value : (m ? m.role : "member");
     if (!newName || !newEmail.includes("@")) { toast("Enter a valid name and email.", true); return; }
 
     const { error } = await db.rpc("admin_update_member", {
-      target_id: saveBtn.dataset.saveMember,
+      target_id: memberId,
       new_name: newName,
       new_email: newEmail,
     });
     if (error) { toast("Update failed: " + error.message, true); return; }
-    toast("Member updated ✓ They log in with the new email from now on.");
+
+    // role change → update profile + clean up role-specific assignments
+    if (m && newRole !== m.role && m.role !== "super_admin") {
+      const { error: rErr } = await db.rpc("admin_set_role", {
+        target_id: memberId,
+        new_role: newRole,
+      });
+      if (rErr) { toast("Role update failed: " + rErr.message, true); return; }
+      await applyRoleCleanup(memberId, newRole);
+      toast(`${newName} is now ${roleLabel(newRole)} ✓`);
+    } else {
+      toast("Member updated ✓ They log in with the new email from now on.");
+    }
     renderTeam();
     return;
   }
