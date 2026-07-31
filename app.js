@@ -492,7 +492,8 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
     if (view === "bonuses") renderBonuses();
     if (view === "overtime-rq") renderOvertimeRQ();
     if (view === "leave-rq") renderLeaveRQ();
-    if (view === "metrics") renderMetrics();
+    if (view === "metrics") { renderMetrics(); subscribeMetricsRealtime(); }
+    else { unsubscribeMetricsRealtime(); }
     if (view === "payroll") renderPayroll();
   });
 });
@@ -3012,6 +3013,78 @@ async function saveMetric(userId, patch) {
     .eq("user_id", userId)
     .eq("month", bonusMonthKey(metricsMonth));
   if (error) toast("Metrics save failed: " + error.message, true);
+}
+
+// ── Realtime: live sync of the Metrics tab across admins ──
+let metricsChannel = null;
+
+function subscribeMetricsRealtime() {
+  if (metricsChannel) return; // already subscribed
+  metricsChannel = db
+    .channel("metrics-live")
+    .on("postgres_changes", { event: "*", schema: "public", table: "metrics" }, (payload) => {
+      const rowMonth = (payload.new && payload.new.month) || (payload.old && payload.old.month);
+      if (rowMonth !== bonusMonthKey(metricsMonth)) return; // only the month on screen
+      if (payload.new) applyMetricRowLive(payload.new);
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "metrics_team_members" }, () => {
+      scheduleMetricsResync();
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "metrics_teams" }, () => {
+      scheduleMetricsResync();
+    })
+    .subscribe();
+}
+
+function unsubscribeMetricsRealtime() {
+  if (metricsChannel) { db.removeChannel(metricsChannel); metricsChannel = null; }
+}
+
+// team structure changed elsewhere → re-render, but not while THIS admin is
+// mid-drag, and debounced so a burst of sort updates only redraws once
+let metricsResyncTimer = null;
+function scheduleMetricsResync() {
+  if (dragUserId) return; // don't yank the table out from under an active drag
+  clearTimeout(metricsResyncTimer);
+  metricsResyncTimer = setTimeout(() => {
+    if (!dragUserId && !$("view-metrics").classList.contains("hidden")) renderMetrics();
+  }, 400);
+}
+
+// apply an incoming metrics-row change in place, without a full re-render,
+// and without disturbing a field this admin is currently editing
+function applyMetricRowLive(row) {
+  const body = $("metrics-body");
+  const rows = body.querySelectorAll(`.metric-chatter-row[data-metric-user="${row.user_id}"]`);
+  if (!rows.length) return;
+  const active = document.activeElement;
+
+  rows.forEach((tr) => {
+    // avg colour
+    const avgCell = tr.querySelector(".metric-avg");
+    if (avgCell) {
+      ["red", "pink", "hotpink"].forEach((c) => avgCell.classList.remove("avg-" + c));
+      if (row.avg_color) avgCell.classList.add("avg-" + row.avg_color);
+    }
+    // count buttons
+    tr.querySelectorAll(".metric-count").forEach((btn) => {
+      const f = btn.dataset.countField;
+      if (row[f] != null) {
+        btn.textContent = `${row[f]} Remaining`;
+        btn.className = `metric-count ${countClass(row[f])}`;
+      }
+    });
+    // feedback textareas — skip the one being typed in
+    tr.querySelectorAll(".metric-fb").forEach((ta) => {
+      const f = ta.dataset.fbField;
+      if (ta !== active && row[f] != null && ta.value !== row[f]) ta.value = row[f];
+    });
+    // implement checkboxes — skip the one being toggled
+    tr.querySelectorAll(".metric-check").forEach((chk) => {
+      const f = chk.dataset.checkField;
+      if (chk !== active && typeof row[f] === "boolean") chk.checked = row[f];
+    });
+  });
 }
 
 // ── metrics teams: create / delete ──
