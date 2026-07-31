@@ -87,12 +87,18 @@ function num(v) {
 function roleLabel(role) {
   if (role === "member") return "Chatter";
   if (role === "non_chatter") return "Non-Chatter";
+  if (role === "qa") return "QA";
   if (role === "super_admin") return "Super Admin";
   return "Admin";
 }
 
 function isAdminUser(profile) {
   return profile.role === "admin" || profile.role === "super_admin";
+}
+
+// QA: same as a non-chatter for timesheets, plus Metrics + Bonuses tabs
+function isQA(profile) {
+  return profile.role === "qa";
 }
 
 function isSuperAdmin(profile) {
@@ -124,7 +130,8 @@ function isNonChatter(profile) {
   // admins are classified as non-chatters: hourly-only timesheets,
   // no sales/commission, no bonuses, not eligible for sales teams.
   // super admins are excluded from everything (not an employee).
-  return profile.role === "non_chatter" || profile.role === "admin" || profile.role === "super_admin";
+  // QA is also hourly-only like a non-chatter.
+  return profile.role === "non_chatter" || profile.role === "qa" || profile.role === "admin" || profile.role === "super_admin";
 }
 
 function toast(msg, isError = false) {
@@ -363,6 +370,9 @@ async function init() {
 
   if (isAdminUser(profile)) {
     document.querySelectorAll(".admin-only").forEach((el) => el.classList.remove("hidden"));
+  }
+  if (isQA(profile)) {
+    document.querySelectorAll(".qa-only").forEach((el) => el.classList.remove("hidden"));
   }
   if (profile.role === "member" || profile.role === "test") {
     document.querySelectorAll(".member-only").forEach((el) => el.classList.remove("hidden"));
@@ -1214,16 +1224,16 @@ $("members-body").addEventListener("click", async (e) => {
     if (!m) return;
     const tr = $("members-body").querySelector(`tr[data-member-row="${m.id}"]`);
     if (!tr) return;
-    // super admin may set Admin; a regular admin can only toggle Chatter/Non-Chatter
+    // super admin may set Admin; a regular admin can only toggle Chatter/Non-Chatter/QA
     const roleChoices = isSuperAdmin(currentProfile)
-      ? ["member", "non_chatter", "admin"]
-      : ["member", "non_chatter"];
+      ? ["member", "non_chatter", "qa", "admin"]
+      : ["member", "non_chatter", "qa"];
     const roleOptions = roleChoices
       .map((r) => `<option value="${r}" ${m.role === r ? "selected" : ""}>${roleLabel(r)}</option>`)
       .join("");
     // an admin editing another admin can't change their role (shouldn't reach
     // here, but guard anyway) → show a static pill
-    const roleEditable = isSuperAdmin(currentProfile) || (m.role === "member" || m.role === "non_chatter");
+    const roleEditable = isSuperAdmin(currentProfile) || (m.role === "member" || m.role === "non_chatter" || m.role === "qa");
     const roleCell = (m.role === "super_admin" || !roleEditable)
       ? `<td><span class="role-pill ${m.role}">${roleLabel(m.role)}</span></td>`
       : `<td><select class="edit-field" data-edit-role>${roleOptions}</select></td>`;

@@ -1355,3 +1355,6 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
   line-height: 1;
 }
 .btn-icon:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+/* ════════════ UPDATE 50: QA role ════════════ */
+.role-pill.qa { background: rgba(63,211,224,0.14); color: var(--c-fansly); }
