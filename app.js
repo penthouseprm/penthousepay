@@ -84,10 +84,17 @@ function num(v) {
   return isNaN(n) ? 0 : n;
 }
 
+// hourly-only roles that behave like Non-Chatter but get their own payroll
+// section. Add a new one here + in roleLabel + the invite/edit dropdowns and
+// it flows through automatically.
+const HOURLY_ROLES = ["non_chatter", "qa", "admin_team", "marketing_team"];
+
 function roleLabel(role) {
   if (role === "member") return "Chatter";
   if (role === "non_chatter") return "Non-Chatter";
   if (role === "qa") return "QA";
+  if (role === "admin_team") return "Admin Team";
+  if (role === "marketing_team") return "Marketing Team";
   if (role === "super_admin") return "Super Admin";
   return "Admin";
 }
@@ -127,11 +134,10 @@ function wasEmployedIn(m, monthDate, hasDataThisMonth) {
 }
 
 function isNonChatter(profile) {
-  // admins are classified as non-chatters: hourly-only timesheets,
-  // no sales/commission, no bonuses, not eligible for sales teams.
-  // super admins are excluded from everything (not an employee).
-  // QA is also hourly-only like a non-chatter.
-  return profile.role === "non_chatter" || profile.role === "qa" || profile.role === "admin" || profile.role === "super_admin";
+  // hourly-only roles + admins: hourly-only timesheets, no sales/commission,
+  // no bonuses, not eligible for sales teams. Super admins are excluded from
+  // everything (not an employee).
+  return HOURLY_ROLES.includes(profile.role) || profile.role === "admin" || profile.role === "super_admin";
 }
 
 function toast(msg, isError = false) {
@@ -1224,16 +1230,16 @@ $("members-body").addEventListener("click", async (e) => {
     if (!m) return;
     const tr = $("members-body").querySelector(`tr[data-member-row="${m.id}"]`);
     if (!tr) return;
-    // super admin may set Admin; a regular admin can only toggle Chatter/Non-Chatter/QA
+    // super admin may set Admin; a regular admin can only toggle the non-admin roles
     const roleChoices = isSuperAdmin(currentProfile)
-      ? ["member", "non_chatter", "qa", "admin"]
-      : ["member", "non_chatter", "qa"];
+      ? ["member", "non_chatter", "qa", "admin_team", "marketing_team", "admin"]
+      : ["member", "non_chatter", "qa", "admin_team", "marketing_team"];
     const roleOptions = roleChoices
       .map((r) => `<option value="${r}" ${m.role === r ? "selected" : ""}>${roleLabel(r)}</option>`)
       .join("");
     // an admin editing another admin can't change their role (shouldn't reach
     // here, but guard anyway) → show a static pill
-    const roleEditable = isSuperAdmin(currentProfile) || (m.role === "member" || m.role === "non_chatter" || m.role === "qa");
+    const roleEditable = isSuperAdmin(currentProfile) || (m.role === "member" || HOURLY_ROLES.includes(m.role));
     const roleCell = (m.role === "super_admin" || !roleEditable)
       ? `<td><span class="role-pill ${m.role}">${roleLabel(m.role)}</span></td>`
       : `<td><select class="edit-field" data-edit-role>${roleOptions}</select></td>`;
@@ -3535,12 +3541,46 @@ async function renderPayroll() {
 
   const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, bonus: 0, ot: 0, fines: 0, on15: 0, on1: 0, total: 0,
                   ofNet: 0, fvNet: 0, slushyNet: 0, fanslyNet: 0 };
-  const ncGrand = { h1Hours: 0, h2Hours: 0, on15: 0, on1: 0, total: 0 };
-  const ncBody = $("payroll-nc-body");
-  ncBody.innerHTML = "";
-  const qaGrand = { h1Hours: 0, h2Hours: 0, on15: 0, on1: 0, total: 0 };
-  const qaBody = $("payroll-qa-body");
-  qaBody.innerHTML = "";
+  // one payroll section per hourly-only role, built on demand
+  const hourlyContainer = $("payroll-hourly-sections");
+  hourlyContainer.innerHTML = "";
+  const hourlySections = {}; // role → { body, grand }
+  function hourlySectionFor(role) {
+    if (hourlySections[role]) return hourlySections[role];
+    const section = document.createElement("section");
+    section.className = "panel";
+    section.innerHTML = `
+      <h3>Monthly summary — ${roleLabel(role)}</h3>
+      <div class="table-scroll">
+        <table class="sheet plain" style="min-width: 800px;">
+          <thead>
+            <tr>
+              <th>Member</th><th>Submitted</th>
+              <th class="col-num th-hours">Hrs 1–14</th>
+              <th class="col-num th-hours">Hrs 15–end</th>
+              <th class="col-num th-payout">Pay on 15th $</th>
+              <th class="col-num th-payout">Pay on 1st $</th>
+              <th class="col-num">Month Total $</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>`;
+    hourlyContainer.appendChild(section);
+    const body = section.querySelector("tbody");
+    const foot = section.querySelector("tfoot");
+    // wire the shared payroll interactions
+    body.addEventListener("click", handlePayAmountClick);
+    body.addEventListener("change", handlePaidToggle);
+    body.addEventListener("click", handleMemberLinkClick);
+    body.addEventListener("click", handleUnsubmit);
+    const grand = { h1Hours: 0, h2Hours: 0, on15: 0, on1: 0, total: 0 };
+    hourlySections[role] = { body, foot, grand };
+    return hourlySections[role];
+  }
+  // pre-create in a stable order so sections always appear in this sequence
+  ["non_chatter", "qa", "admin_team", "marketing_team"].forEach((r) => hourlySectionFor(r));
   const mgrGrand = { h1Hours: 0, h2Hours: 0, teamNet: 0, comm: 0, on15: 0, on1: 0, total: 0 };
   const mgrBody = $("payroll-mgr-body");
   mgrBody.innerHTML = "";
@@ -3638,18 +3678,21 @@ async function renderPayroll() {
       return;
     }
 
-    // ── QA: hourly only, own section ──
-    if (m.role === "qa") {
+    // ── HOURLY-ONLY ROLES: Non-Chatter / QA / Admin Team / Marketing Team ──
+    // each renders in its own section, keyed by role
+    if (HOURLY_ROLES.includes(m.role)) {
+      const sec = hourlySectionFor(m.role);
       let payOn15 = h1Pay;
       let payOn1 = h2Pay;
+      // fired: full remaining pay lands on the next unpaid payday
       if (m.fired && !paid15) { payOn15 = h1Pay + h2Pay; payOn1 = 0; }
       const monthTotal = payOn15 + payOn1;
 
-      qaGrand.h1Hours += h1Hours;
-      qaGrand.h2Hours += h2Hours;
-      qaGrand.on15 += payOn15;
-      qaGrand.on1 += payOn1;
-      qaGrand.total += monthTotal;
+      sec.grand.h1Hours += h1Hours;
+      sec.grand.h2Hours += h2Hours;
+      sec.grand.on15 += payOn15;
+      sec.grand.on1 += payOn1;
+      sec.grand.total += monthTotal;
 
       const firedBadge = m.fired ? ` <span class="fired-badge" title="Fired — full pay due next payday">FIRED</span>` : "";
       const tr = document.createElement("tr");
@@ -3672,51 +3715,7 @@ async function renderPayroll() {
         </td>
         <td class="col-num"><strong>${fmt(monthTotal)}</strong></td>
       `;
-      qaBody.appendChild(tr);
-      return;
-    }
-
-    // ── NON-CHATTERS: hourly only ──
-    if (isNonChatter(m)) {
-      let payOn15 = h1Pay;
-      let payOn1 = h2Pay;
-
-      // fired: full remaining pay lands on the next unpaid payday
-      if (m.fired && !paid15) {
-        payOn15 = h1Pay + h2Pay;
-        payOn1 = 0;
-      }
-      const monthTotal = payOn15 + payOn1;
-
-      ncGrand.h1Hours += h1Hours;
-      ncGrand.h2Hours += h2Hours;
-      ncGrand.on15 += payOn15;
-      ncGrand.on1 += payOn1;
-      ncGrand.total += monthTotal;
-
-      const firedBadge = m.fired ? ` <span class="fired-badge" title="Fired — full pay due next payday">FIRED</span>` : "";
-
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td><button class="member-link" data-view-member="${m.id}" type="button">${m.name || m.email}</button>${firedBadge}</td>
-        <td>${badge(h1Sub, "1st half", pKeys[0])} ${badge(h2Sub, "2nd half", pKeys[1])}</td>
-        <td class="col-num">${h1Hours}</td>
-        <td class="col-num">${h2Hours}</td>
-        <td class="col-num cell-payout${paid15 ? " paid" : ""}">
-          <div class="paid-wrap">
-            <span class="pay-amount"><strong>${fmt(payOn15)}</strong></span>
-            <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay15Key}" ${paid15 ? "checked" : ""}>
-          </div>
-        </td>
-        <td class="col-num cell-payout${paid1 ? " paid" : ""}">
-          <div class="paid-wrap">
-            <span class="pay-amount"><strong>${fmt(payOn1)}</strong></span>
-            <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay1Key}" ${paid1 ? "checked" : ""}>
-          </div>
-        </td>
-        <td class="col-num"><strong>${fmt(monthTotal)}</strong></td>
-      `;
-      ncBody.appendChild(tr);
+      sec.body.appendChild(tr);
       return;
     }
 
@@ -3803,29 +3802,23 @@ async function renderPayroll() {
     </tr>
   `;
 
-  $("payroll-nc-foot").innerHTML = `
-    <tr>
-      <td>ALL NON-CHATTERS</td>
-      <td></td>
-      <td class="col-num">${ncGrand.h1Hours}</td>
-      <td class="col-num">${ncGrand.h2Hours}</td>
-      <td class="col-num cell-payout"><strong>${fmt(ncGrand.on15)}</strong></td>
-      <td class="col-num cell-payout"><strong>${fmt(ncGrand.on1)}</strong></td>
-      <td class="col-num"><strong>${fmt(ncGrand.total)}</strong></td>
-    </tr>
-  `;
-
-  $("payroll-qa-foot").innerHTML = `
-    <tr>
-      <td>ALL QA</td>
-      <td></td>
-      <td class="col-num">${qaGrand.h1Hours}</td>
-      <td class="col-num">${qaGrand.h2Hours}</td>
-      <td class="col-num cell-payout"><strong>${fmt(qaGrand.on15)}</strong></td>
-      <td class="col-num cell-payout"><strong>${fmt(qaGrand.on1)}</strong></td>
-      <td class="col-num"><strong>${fmt(qaGrand.total)}</strong></td>
-    </tr>
-  `;
+  // render each hourly-role section's footer (and hide empty sections)
+  Object.keys(hourlySections).forEach((role) => {
+    const sec = hourlySections[role];
+    const hasRows = sec.body.children.length > 0;
+    sec.body.closest("section.panel").classList.toggle("hidden", !hasRows);
+    sec.foot.innerHTML = `
+      <tr>
+        <td>ALL ${roleLabel(role).toUpperCase()}</td>
+        <td></td>
+        <td class="col-num">${sec.grand.h1Hours}</td>
+        <td class="col-num">${sec.grand.h2Hours}</td>
+        <td class="col-num cell-payout"><strong>${fmt(sec.grand.on15)}</strong></td>
+        <td class="col-num cell-payout"><strong>${fmt(sec.grand.on1)}</strong></td>
+        <td class="col-num"><strong>${fmt(sec.grand.total)}</strong></td>
+      </tr>
+    `;
+  });
 
   $("payroll-mgr-foot").innerHTML = `
     <tr>
@@ -3902,7 +3895,6 @@ function handlePayAmountClick(e) {
   sel.addRange(range);
 }
 $("payroll-body").addEventListener("click", handlePayAmountClick);
-$("payroll-nc-body").addEventListener("click", handlePayAmountClick);
 
 // toggle paid checkboxes (both chatter and non-chatter tables)
 async function handlePaidToggle(e) {
@@ -3934,7 +3926,6 @@ async function handlePaidToggle(e) {
   }
 }
 $("payroll-body").addEventListener("change", handlePaidToggle);
-$("payroll-nc-body").addEventListener("change", handlePaidToggle);
 
 // open a member's editable sheet (click again to minimize)
 async function handleMemberLinkClick(e) {
@@ -3960,7 +3951,6 @@ async function handleMemberLinkClick(e) {
   $("member-sheet-panel").scrollIntoView({ behavior: "smooth" });
 }
 $("payroll-body").addEventListener("click", handleMemberLinkClick);
-$("payroll-nc-body").addEventListener("click", handleMemberLinkClick);
 
 // unsubmit a chatter's period from payroll (admin acting on their behalf)
 async function handleUnsubmit(e) {
@@ -3981,15 +3971,10 @@ async function handleUnsubmit(e) {
   renderPayroll();
 }
 $("payroll-body").addEventListener("click", handleUnsubmit);
-$("payroll-nc-body").addEventListener("click", handleUnsubmit);
 $("payroll-mgr-body").addEventListener("click", handleUnsubmit);
 $("payroll-mgr-body").addEventListener("click", handlePayAmountClick);
 $("payroll-mgr-body").addEventListener("change", handlePaidToggle);
 $("payroll-mgr-body").addEventListener("click", handleMemberLinkClick);
-$("payroll-qa-body").addEventListener("click", handlePayAmountClick);
-$("payroll-qa-body").addEventListener("change", handlePaidToggle);
-$("payroll-qa-body").addEventListener("click", handleMemberLinkClick);
-$("payroll-qa-body").addEventListener("click", handleUnsubmit);
 
 // manager commission platform breakdown popover
 $("payroll-mgr-body").addEventListener("click", (e) => {

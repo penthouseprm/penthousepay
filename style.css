@@ -1370,3 +1370,7 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 
 /* ════════════ UPDATE 50: QA role ════════════ */
 .role-pill.qa { background: rgba(63,211,224,0.14); color: var(--c-fansly); }
+
+/* ════════════ UPDATE 52: admin team + marketing team roles ════════════ */
+.role-pill.admin_team { background: rgba(124,124,224,0.14); color: #9a9af0; }
+.role-pill.marketing_team { background: rgba(224,144,84,0.14); color: #e6a35c; }
