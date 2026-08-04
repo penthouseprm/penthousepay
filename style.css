@@ -1287,13 +1287,25 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 .floater-f {
   display: inline-block;
   font-size: 10px; font-weight: 800;
-  width: 16px; height: 16px; line-height: 16px; text-align: center;
+  width: 16px; height: 16px; line-height: 14px; text-align: center;
   border-radius: 4px;
+  margin-left: 6px; vertical-align: middle;
+  cursor: pointer; padding: 0;
+  transition: opacity 0.12s;
+}
+.floater-f.on {
   background: rgba(63,211,224,0.18);
   color: var(--c-fansly);
-  border: 1px solid rgba(63,211,224,0.5);
-  margin-left: 6px; vertical-align: middle;
+  border: 1px solid rgba(63,211,224,0.6);
 }
+.floater-f.off {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  opacity: 0;
+}
+.metric-chatter-row:hover .floater-f.off { opacity: 0.5; }
+.floater-f.off:hover { opacity: 1; border-color: var(--c-fansly); color: var(--c-fansly); }
 .metric-remove {
   background: none; border: none; color: var(--c-total);
   cursor: pointer; font-size: 11px; margin-left: 8px; opacity: 0;

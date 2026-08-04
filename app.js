@@ -2904,7 +2904,7 @@ async function renderMetrics() {
     if (!row) {
       row = {
         user_id: m.id, month: mKey, avg_color: null,
-        coaching: coachingSeed(avg), spender: 1,
+        coaching: coachingSeed(avg), spender: 1, floater: false,
         fb1: "", fb1_impl: false, fb2: "", fb2_impl: false,
         fb3: "", fb3_impl: false, fb4: "", fb4_impl: false,
       };
@@ -2919,11 +2919,12 @@ async function renderMetrics() {
       `<td><textarea class="metric-fb" data-fb-field="${field}" data-fb-user="${m.id}" rows="2" placeholder="–">${val || ""}</textarea></td>`;
     const hoursDisp = Math.round(stat.hours * 100) / 100;
 
-    const teamCount = (teamsOfUser[m.id] || []).length;
-    const floaterBadge = teamCount > 1 ? ` <span class="floater-f" title="Floater — on ${teamCount} teams">F</span>` : "";
+    // manual floater flag (toggle the F badge on/off, independent of team count)
+    const isFloater = !!row.floater;
+    const floaterBadge = ` <button class="floater-f ${isFloater ? "on" : "off"}" data-floater-user="${m.id}" title="${isFloater ? "Floater — click to unset" : "Mark as floater"}">F</button>`;
     // controls shown under a real team: duplicate to another team + remove
     const dupBtn = groupId
-      ? `<button class="metric-dup" data-dup-user="${m.id}" title="Add to another team (floater)">⧉</button>`
+      ? `<button class="metric-dup" data-dup-user="${m.id}" title="Add to another team">⧉</button>`
       : "";
     const removeBtn = groupId
       ? `<button class="metric-remove" data-remove-user="${m.id}" data-remove-team="${groupId}" title="Remove from this team">✕</button>`
@@ -3094,6 +3095,14 @@ function applyMetricRowLive(row) {
       const f = chk.dataset.checkField;
       if (chk !== active && typeof row[f] === "boolean") chk.checked = row[f];
     });
+    // manual floater flag
+    if (typeof row.floater === "boolean") {
+      const fb = tr.querySelector(".floater-f");
+      if (fb) {
+        fb.classList.toggle("on", row.floater);
+        fb.classList.toggle("off", !row.floater);
+      }
+    }
   });
 }
 
@@ -3113,6 +3122,21 @@ $("metrics-body").addEventListener("click", async (e) => {
   if (e.target.closest("#unassigned-toggle")) {
     metricsUnassignedOpen = !metricsUnassignedOpen;
     renderMetrics();
+    return;
+  }
+
+  // toggle manual floater flag
+  const fBtn = e.target.closest("[data-floater-user]");
+  if (fBtn) {
+    e.stopPropagation();
+    const turningOn = fBtn.classList.contains("off");
+    // reflect immediately on every instance of this chatter
+    document.querySelectorAll(`[data-floater-user="${fBtn.dataset.floaterUser}"]`).forEach((b) => {
+      b.classList.toggle("on", turningOn);
+      b.classList.toggle("off", !turningOn);
+      b.title = turningOn ? "Floater — click to unset" : "Mark as floater";
+    });
+    saveMetric(fBtn.dataset.floaterUser, { floater: turningOn });
     return;
   }
 
@@ -3306,33 +3330,6 @@ async function commitDragOrder() {
   const failed = results.find((r) => r.error);
   if (failed) { toast("Order not fully saved — refreshing.", true); renderMetrics(); }
   // no re-render on success: the DOM already reflects the final state
-  // update floater badges live in case membership changed
-  refreshFloaterBadges();
-}
-
-// recompute the cyan F badges without a full reload
-function refreshFloaterBadges() {
-  const body = $("metrics-body");
-  const counts = {};
-  body.querySelectorAll(".metric-chatter-row").forEach((r) => {
-    const id = r.dataset.metricUser;
-    if ((r.dataset.dropTeam || "") !== "") counts[id] = (counts[id] || 0) + 1;
-  });
-  body.querySelectorAll(".metric-chatter-row").forEach((r) => {
-    const id = r.dataset.metricUser;
-    const nameCell = r.children[1];
-    const existing = nameCell.querySelector(".floater-f");
-    const isFloater = (counts[id] || 0) > 1;
-    if (isFloater && !existing) {
-      const b = document.createElement("span");
-      b.className = "floater-f";
-      b.title = "Floater — on multiple teams";
-      b.textContent = "F";
-      nameCell.insertBefore(b, nameCell.querySelector(".metric-dup") || null);
-    } else if (!isFloater && existing) {
-      existing.remove();
-    }
-  });
 }
 
 // duplicate menu: pick a team → add chatter to it (floater)
@@ -3541,6 +3538,9 @@ async function renderPayroll() {
   const ncGrand = { h1Hours: 0, h2Hours: 0, on15: 0, on1: 0, total: 0 };
   const ncBody = $("payroll-nc-body");
   ncBody.innerHTML = "";
+  const qaGrand = { h1Hours: 0, h2Hours: 0, on15: 0, on1: 0, total: 0 };
+  const qaBody = $("payroll-qa-body");
+  qaBody.innerHTML = "";
   const mgrGrand = { h1Hours: 0, h2Hours: 0, teamNet: 0, comm: 0, on15: 0, on1: 0, total: 0 };
   const mgrBody = $("payroll-mgr-body");
   mgrBody.innerHTML = "";
@@ -3635,6 +3635,44 @@ async function renderPayroll() {
         <td class="col-num"><strong>${fmt(monthTotal)}</strong></td>
       `;
       mgrBody.appendChild(tr);
+      return;
+    }
+
+    // ── QA: hourly only, own section ──
+    if (m.role === "qa") {
+      let payOn15 = h1Pay;
+      let payOn1 = h2Pay;
+      if (m.fired && !paid15) { payOn15 = h1Pay + h2Pay; payOn1 = 0; }
+      const monthTotal = payOn15 + payOn1;
+
+      qaGrand.h1Hours += h1Hours;
+      qaGrand.h2Hours += h2Hours;
+      qaGrand.on15 += payOn15;
+      qaGrand.on1 += payOn1;
+      qaGrand.total += monthTotal;
+
+      const firedBadge = m.fired ? ` <span class="fired-badge" title="Fired — full pay due next payday">FIRED</span>` : "";
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><button class="member-link" data-view-member="${m.id}" type="button">${m.name || m.email}</button>${firedBadge}</td>
+        <td>${badge(h1Sub, "1st half", pKeys[0])} ${badge(h2Sub, "2nd half", pKeys[1])}</td>
+        <td class="col-num">${h1Hours}</td>
+        <td class="col-num">${h2Hours}</td>
+        <td class="col-num cell-payout${paid15 ? " paid" : ""}">
+          <div class="paid-wrap">
+            <span class="pay-amount"><strong>${fmt(payOn15)}</strong></span>
+            <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay15Key}" ${paid15 ? "checked" : ""}>
+          </div>
+        </td>
+        <td class="col-num cell-payout${paid1 ? " paid" : ""}">
+          <div class="paid-wrap">
+            <span class="pay-amount"><strong>${fmt(payOn1)}</strong></span>
+            <input type="checkbox" class="paid-check" data-pay-user="${m.id}" data-pay-period="${pay1Key}" ${paid1 ? "checked" : ""}>
+          </div>
+        </td>
+        <td class="col-num"><strong>${fmt(monthTotal)}</strong></td>
+      `;
+      qaBody.appendChild(tr);
       return;
     }
 
@@ -3774,6 +3812,18 @@ async function renderPayroll() {
       <td class="col-num cell-payout"><strong>${fmt(ncGrand.on15)}</strong></td>
       <td class="col-num cell-payout"><strong>${fmt(ncGrand.on1)}</strong></td>
       <td class="col-num"><strong>${fmt(ncGrand.total)}</strong></td>
+    </tr>
+  `;
+
+  $("payroll-qa-foot").innerHTML = `
+    <tr>
+      <td>ALL QA</td>
+      <td></td>
+      <td class="col-num">${qaGrand.h1Hours}</td>
+      <td class="col-num">${qaGrand.h2Hours}</td>
+      <td class="col-num cell-payout"><strong>${fmt(qaGrand.on15)}</strong></td>
+      <td class="col-num cell-payout"><strong>${fmt(qaGrand.on1)}</strong></td>
+      <td class="col-num"><strong>${fmt(qaGrand.total)}</strong></td>
     </tr>
   `;
 
@@ -3936,6 +3986,10 @@ $("payroll-mgr-body").addEventListener("click", handleUnsubmit);
 $("payroll-mgr-body").addEventListener("click", handlePayAmountClick);
 $("payroll-mgr-body").addEventListener("change", handlePaidToggle);
 $("payroll-mgr-body").addEventListener("click", handleMemberLinkClick);
+$("payroll-qa-body").addEventListener("click", handlePayAmountClick);
+$("payroll-qa-body").addEventListener("change", handlePaidToggle);
+$("payroll-qa-body").addEventListener("click", handleMemberLinkClick);
+$("payroll-qa-body").addEventListener("click", handleUnsubmit);
 
 // manager commission platform breakdown popover
 $("payroll-mgr-body").addEventListener("click", (e) => {
