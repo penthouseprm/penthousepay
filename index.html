@@ -1186,7 +1186,7 @@ function drawTgConv(){
   h+='<div style="padding:12px 16px;border-top:0.5px solid var(--border);background:var(--bg);display:flex;gap:8px;align-items:flex-end">'+
     '<input type="file" id="tg-file" style="display:none" accept="image/*,video/*,*/*" onchange="sendTgFile(this)">'+
     '<button class="btn" onclick="document.getElementById(&apos;tg-file&apos;).click()" title="Attach photo, video or file" style="padding:0 12px;height:38px;align-self:flex-end">\uD83D\uDCCE</button>'+
-    '<textarea id="tg-input" placeholder="Type a message…" rows="1" style="flex:1;resize:none;min-height:38px;max-height:220px;overflow-y:auto" oninput="tgAutoGrow(this)" onkeydown="tgInputKey(event)"></textarea>'+
+    '<textarea id="tg-input" placeholder="Type a message…" rows="1" style="flex:1;resize:none;min-height:38px;max-height:220px;overflow-y:auto;box-sizing:border-box" oninput="tgAutoGrow(this)" onkeydown="tgInputKey(event)"></textarea>'+
     '<button class="btn btn-blue" onclick="sendTgMsg()" style="align-self:flex-end">Send</button>'+
   '</div>';
   conv.innerHTML=h;
