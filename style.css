@@ -1374,3 +1374,16 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 /* ════════════ UPDATE 52: admin team + marketing team roles ════════════ */
 .role-pill.admin_team { background: rgba(124,124,224,0.14); color: #9a9af0; }
 .role-pill.marketing_team { background: rgba(224,144,84,0.14); color: #e6a35c; }
+
+/* ════════════ UPDATE 53: drag whole teams ════════════ */
+.team-drag-handle {
+  cursor: grab;
+  color: var(--accent);
+  opacity: 0.55;
+  margin-right: 4px;
+  font-size: 13px;
+  user-select: none;
+}
+.team-drag-handle:hover { opacity: 1; }
+.metrics-team-row.team-dragging { opacity: 0.5; }
+.metrics-team-row.team-dragging td { background: var(--accent-soft) !important; }

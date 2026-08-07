@@ -2984,7 +2984,8 @@ async function renderMetrics() {
       divider.classList.add("metrics-unassigned-row");
       divider.innerHTML = `<td colspan="14"><button class="unassigned-toggle" id="unassigned-toggle" type="button"><span class="team-chevron ${metricsUnassignedOpen ? "open" : ""}">▾</span> Unassigned (${inGroup.length})</button></td>`;
     } else {
-      divider.innerHTML = `<td colspan="14"><span class="metrics-team-name">${g.name}</span> <button class="metrics-team-edit" data-edit-metrics-team="${g.id}" title="Rename team">✎</button> <button class="metrics-team-del" data-del-metrics-team="${g.id}" title="Delete team">✕</button></td>`;
+      divider.dataset.teamId = g.id;
+      divider.innerHTML = `<td colspan="14"><span class="team-drag-handle" title="Drag to reorder team">⠿</span> <span class="metrics-team-name">${g.name}</span> <button class="metrics-team-edit" data-edit-metrics-team="${g.id}" title="Rename team">✎</button> <button class="metrics-team-del" data-del-metrics-team="${g.id}" title="Delete team">✕</button></td>`;
     }
     body.appendChild(divider);
 
@@ -3216,6 +3217,8 @@ $("metrics-body").addEventListener("click", async (e) => {
 // ── drag + drop chatters (handle-only, live DOM move) ──
 let dragUserId = null;
 let dragRow = null;
+let dragTeamId = null;
+let dragTeamDivider = null;
 
 function wireMetricsDragDrop() {
   const body = $("metrics-body");
@@ -3303,6 +3306,74 @@ function wireMetricsDragDrop() {
   body.addEventListener("drop", (e) => {
     if (dragRow) e.preventDefault(); // actual persist happens in dragend→commit
   });
+
+  // ── whole-team drag: reorder teams by their name/handle ──
+  body.querySelectorAll(".team-drag-handle").forEach((h) => {
+    const divider = h.closest(".metrics-team-row");
+    if (!divider) return;
+    h.addEventListener("mousedown", () => divider.setAttribute("draggable", "true"));
+
+    divider.addEventListener("dragstart", (e) => {
+      dragTeamId = divider.dataset.teamId;
+      dragTeamDivider = divider;
+      divider.classList.add("team-dragging");
+      e.dataTransfer.effectAllowed = "move";
+      try { e.dataTransfer.setData("text/plain", "team:" + dragTeamId); } catch (_) {}
+      e.stopPropagation();
+    });
+    divider.addEventListener("dragend", () => {
+      divider.classList.remove("team-dragging");
+      divider.removeAttribute("draggable");
+      body.querySelectorAll(".team-drop-line").forEach((el) => el.classList.remove("team-drop-line"));
+      commitTeamOrder();
+      dragTeamId = null; dragTeamDivider = null;
+    });
+  });
+
+  // returns the list of [divider, ...its chatter rows] as a movable block
+  function teamBlock(divider) {
+    const block = [divider];
+    let n = divider.nextElementSibling;
+    while (n && !n.classList.contains("metrics-team-row")) { block.push(n); n = n.nextElementSibling; }
+    return block;
+  }
+
+  body.addEventListener("dragover", (e) => {
+    if (!dragTeamDivider) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+
+    // find the team divider we're hovering over (skip Unassigned — it stays last)
+    const dividers = Array.from(body.querySelectorAll(".metrics-team-row[data-team-id]"))
+      .filter((d) => d !== dragTeamDivider);
+    let target = null;
+    for (const d of dividers) {
+      const rect = d.getBoundingClientRect();
+      if (e.clientY < rect.top + rect.height / 2) { target = d; break; }
+    }
+
+    const block = teamBlock(dragTeamDivider);
+    if (target) {
+      target.before(...block);
+    } else {
+      // after the last real team (before Unassigned if present)
+      const unassigned = body.querySelector(".metrics-unassigned-row");
+      if (unassigned) unassigned.before(...block);
+      else body.append(...block);
+    }
+  }, true); // capture so this runs before the chatter-drag dragover
+}
+
+// persist the new team order from the DOM
+async function commitTeamOrder() {
+  const body = $("metrics-body");
+  const ids = Array.from(body.querySelectorAll(".metrics-team-row[data-team-id]"))
+    .map((d) => d.dataset.teamId);
+  const updates = ids.map((id, i) =>
+    db.from("metrics_teams").update({ sort: i }).eq("id", id)
+  );
+  const results = await Promise.all(updates);
+  if (results.find((r) => r.error)) { toast("Team order not fully saved — refreshing.", true); renderMetrics(); }
 }
 
 // read the current DOM order and persist team membership + sort for the moved chatter
