@@ -3359,6 +3359,47 @@ function wireMetricsDragDrop() {
       }
     }
   }, true); // capture so this runs before the chatter-drag dragover
+
+  // ── auto-scroll the metrics container when dragging near its edges ──
+  const scroller = body.closest(".table-scroll");
+  if (scroller && !scroller.dataset.autoscrollWired) {
+    scroller.dataset.autoscrollWired = "1";
+    let autoScrollRAF = null;
+    let scrollSpeed = 0;
+
+    const step = () => {
+      if (scrollSpeed !== 0) {
+        scroller.scrollTop += scrollSpeed;
+        autoScrollRAF = requestAnimationFrame(step);
+      } else {
+        autoScrollRAF = null;
+      }
+    };
+
+    scroller.addEventListener("dragover", (e) => {
+      // only while something in this table is being dragged
+      if (!dragRow && !dragTeamDivider) { scrollSpeed = 0; return; }
+      const rect = scroller.getBoundingClientRect();
+      const zone = 60;               // px from an edge that triggers scrolling
+      const maxSpeed = 18;           // px per frame at the very edge
+      let speed = 0;
+      if (e.clientY < rect.top + zone) {
+        speed = -maxSpeed * (1 - (e.clientY - rect.top) / zone);
+      } else if (e.clientY > rect.bottom - zone) {
+        speed = maxSpeed * (1 - (rect.bottom - e.clientY) / zone);
+      }
+      scrollSpeed = speed;
+      if (scrollSpeed !== 0 && !autoScrollRAF) autoScrollRAF = requestAnimationFrame(step);
+    });
+
+    const stopAutoScroll = () => { scrollSpeed = 0; };
+    scroller.addEventListener("drop", stopAutoScroll);
+    scroller.addEventListener("dragend", stopAutoScroll, true);
+    scroller.addEventListener("dragleave", (e) => {
+      // stop if the pointer actually left the scroller
+      if (!scroller.contains(e.relatedTarget)) scrollSpeed = 0;
+    });
+  }
 }
 
 let teamDropTarget = null;
