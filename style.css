@@ -1385,5 +1385,16 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
   user-select: none;
 }
 .team-drag-handle:hover { opacity: 1; }
-.metrics-team-row.team-dragging { opacity: 0.5; }
-.metrics-team-row.team-dragging td { background: var(--accent-soft) !important; }
+/* the team being dragged: dim + dashed outline so it's clearly "in motion" */
+.metrics-team-row.team-dragging td {
+  background: var(--accent-soft) !important;
+  opacity: 0.6;
+  outline: 1px dashed var(--accent);
+}
+/* bold insertion line showing exactly where the team will land */
+.metrics-team-row.team-drop-before td {
+  box-shadow: inset 0 4px 0 var(--accent);
+}
+.metrics-team-row.team-drop-after td {
+  box-shadow: inset 0 -4px 0 var(--accent);
+}

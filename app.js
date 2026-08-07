@@ -3324,19 +3324,10 @@ function wireMetricsDragDrop() {
     divider.addEventListener("dragend", () => {
       divider.classList.remove("team-dragging");
       divider.removeAttribute("draggable");
-      body.querySelectorAll(".team-drop-line").forEach((el) => el.classList.remove("team-drop-line"));
-      commitTeamOrder();
-      dragTeamId = null; dragTeamDivider = null;
+      commitTeamOrder(divider, teamDropTarget); // pass refs so async work isn't raced
+      dragTeamId = null; dragTeamDivider = null; teamDropTarget = null;
     });
   });
-
-  // returns the list of [divider, ...its chatter rows] as a movable block
-  function teamBlock(divider) {
-    const block = [divider];
-    let n = divider.nextElementSibling;
-    while (n && !n.classList.contains("metrics-team-row")) { block.push(n); n = n.nextElementSibling; }
-    return block;
-  }
 
   body.addEventListener("dragover", (e) => {
     if (!dragTeamDivider) return;
@@ -3352,21 +3343,44 @@ function wireMetricsDragDrop() {
       if (e.clientY < rect.top + rect.height / 2) { target = d; break; }
     }
 
-    const block = teamBlock(dragTeamDivider);
+    // show a clear insertion line at the drop point (don't move anything yet)
+    body.querySelectorAll(".team-drop-before, .team-drop-after").forEach((el) =>
+      el.classList.remove("team-drop-before", "team-drop-after"));
+    teamDropTarget = target; // remember for the drop
     if (target) {
-      target.before(...block);
+      target.classList.add("team-drop-before");
     } else {
-      // after the last real team (before Unassigned if present)
+      // dropping at the end → mark the last real team (or Unassigned) as after
       const unassigned = body.querySelector(".metrics-unassigned-row");
-      if (unassigned) unassigned.before(...block);
-      else body.append(...block);
+      if (unassigned) unassigned.classList.add("team-drop-before");
+      else {
+        const lastTeam = dividers[dividers.length - 1];
+        if (lastTeam) lastTeam.classList.add("team-drop-after");
+      }
     }
   }, true); // capture so this runs before the chatter-drag dragover
 }
 
+let teamDropTarget = null;
+
 // persist the new team order from the DOM
-async function commitTeamOrder() {
+async function commitTeamOrder(divider, dropTarget) {
   const body = $("metrics-body");
+
+  // perform the actual move now (on drop), using the passed target
+  if (divider) {
+    const block = teamBlockOf(divider, body);
+    if (dropTarget && dropTarget.isConnected) {
+      dropTarget.before(...block);
+    } else {
+      const unassigned = body.querySelector(".metrics-unassigned-row");
+      if (unassigned) unassigned.before(...block);
+      else body.append(...block);
+    }
+  }
+  body.querySelectorAll(".team-drop-before, .team-drop-after").forEach((el) =>
+    el.classList.remove("team-drop-before", "team-drop-after"));
+
   const ids = Array.from(body.querySelectorAll(".metrics-team-row[data-team-id]"))
     .map((d) => d.dataset.teamId);
   const updates = ids.map((id, i) =>
@@ -3374,6 +3388,14 @@ async function commitTeamOrder() {
   );
   const results = await Promise.all(updates);
   if (results.find((r) => r.error)) { toast("Team order not fully saved — refreshing.", true); renderMetrics(); }
+}
+
+// the divider + all its chatter rows, as a movable block
+function teamBlockOf(divider, body) {
+  const block = [divider];
+  let n = divider.nextElementSibling;
+  while (n && !n.classList.contains("metrics-team-row")) { block.push(n); n = n.nextElementSibling; }
+  return block;
 }
 
 // read the current DOM order and persist team membership + sort for the moved chatter
