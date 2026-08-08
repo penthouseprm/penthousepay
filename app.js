@@ -127,9 +127,12 @@ function realMembers(list) {
 // - keeps deactivated/fired people on months where they actually have data,
 //   so historical payroll stays accurate
 function wasEmployedIn(m, monthDate, hasDataThisMonth) {
+  // If they have real activity in this month (timesheets, bonuses, OT), they
+  // ALWAYS count — no created_at/active check can hide a month they were paid.
+  if (hasDataThisMonth) return true;
   const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0, 23, 59, 59);
   if (m.created_at && new Date(m.created_at) > monthEnd) return false;
-  if (m.active === false && !hasDataThisMonth) return false;
+  if (m.active === false) return false;
   return true;
 }
 
@@ -544,7 +547,11 @@ async function fetchAllTimesheets(first, last) {
       .select("*")
       .gte("entry_date", first)
       .lte("entry_date", last)
+      // order by entry_date THEN id: entry_date alone isn't unique (many rows
+      // share a date), so range() pagination could drop/duplicate rows at page
+      // boundaries. id is unique and makes the ordering deterministic.
       .order("entry_date", { ascending: true })
+      .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
     if (error) { toast("Failed to load timesheets: " + error.message, true); break; }
     all.push(...(data || []));
