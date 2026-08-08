@@ -1338,12 +1338,15 @@ $("members-body").addEventListener("click", async (e) => {
   if (removeBtn) {
     const m = membersCache.find((x) => x.id === removeBtn.dataset.removeMember);
     if (!m) return;
-    if (!confirm(`PERMANENTLY remove ${m.name || m.email} from the platform?\n\nThis deletes their account, login access, and ALL their data (timesheets, bonuses, fines, payment records). This cannot be undone.`)) return;
-    if (!confirm(`Are you absolutely sure? ${m.name || m.email}'s entire history will be gone.`)) return;
+    if (!confirm(`Remove ${m.name || m.email} from the active team?\n\nThis revokes their login and takes them off the active roster, but KEEPS all their history (timesheets, payroll, bonuses) so past months stay accurate. You can reactivate them later.`)) return;
 
-    const { error } = await db.from("profiles").delete().eq("id", m.id);
+    // NON-DESTRUCTIVE: deactivate + revoke login, never delete the profile
+    // (deleting cascades to timesheets and wipes paid payroll history).
+    const { error } = await db.from("profiles")
+      .update({ active: false, fired: true, fired_at: new Date().toISOString() })
+      .eq("id", m.id);
     if (error) { toast("Could not remove member: " + error.message, true); return; }
-    toast(`${m.name || m.email} removed from the platform`);
+    toast(`${m.name || m.email} removed from the active team (history kept)`);
     renderTeam();
   }
 });
