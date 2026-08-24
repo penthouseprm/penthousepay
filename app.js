@@ -1204,6 +1204,7 @@ async function renderTeam() {
     } else if (isDeactivated) {
       actionsCell = `<td class="actions-cell">
         ${editBtn}
+        <button class="btn btn-primary btn-small" data-reactivate-member="${m.id}" type="button">Reactivate</button>
         <button class="btn btn-danger btn-small" data-remove-member="${m.id}" type="button">Remove</button>
       </td>`;
     } else {
@@ -1316,6 +1317,21 @@ $("members-body").addEventListener("click", async (e) => {
       .eq("id", m.id);
     if (error) { toast("Could not mark as fired: " + error.message, true); return; }
     toast(`${m.name || m.email} marked as fired`);
+    renderTeam();
+    return;
+  }
+
+  const reactivateBtn = e.target.closest("[data-reactivate-member]");
+  if (reactivateBtn) {
+    const m = membersCache.find((x) => x.id === reactivateBtn.dataset.reactivateMember);
+    if (!m) return;
+    if (!confirm(`Reactivate ${m.name || m.email}?\n\nThey'll be back on the active roster with all their history intact. If their login was already removed, they'll need to sign up again with the same email to regain access — their data reconnects automatically.`)) return;
+
+    const { error } = await db.from("profiles")
+      .update({ active: true, fired: false, fired_at: null })
+      .eq("id", m.id);
+    if (error) { toast("Could not reactivate: " + error.message, true); return; }
+    toast(`${m.name || m.email} reactivated`);
     renderTeam();
     return;
   }
