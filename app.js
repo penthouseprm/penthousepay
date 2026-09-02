@@ -845,6 +845,15 @@ function recalcHalfTotals(section, profile) {
       slushy_gross: get("slushy_gross"),
       fansly_gross: get("fansly_gross"),
     };
+    // use this day's own rate (override input if present, else the row's
+    // snapshotted rate) so the footer matches the per-row Hours$ figures,
+    // instead of applying the profile's current rate to every day
+    const rateInput = tr.querySelector(".rate-override");
+    if (rateInput && rateInput.value !== "") {
+      row.hourly_rate = rateInput.value;
+    } else if (tr.dataset.rowRate !== undefined && tr.dataset.rowRate !== "") {
+      row.hourly_rate = tr.dataset.rowRate;
+    }
     const calc = calcRow(row, profile);
     sums.hours += row.hours;
     sums.of += row.of_gross;
@@ -3759,13 +3768,14 @@ async function renderPayroll() {
 
     let h1Hours = 0, h2Hours = 0, commMonth = 0, netMonth = 0;
 
+    let h1Pay = 0, h2Pay = 0;
     rows.forEach((r) => {
       const day = parseInt(r.entry_date.slice(8), 10);
       const calc = calcRow(r, m);
       commMonth += calc.commission;
       netMonth += calc.total;
-      if (day <= 14) { h1Hours += num(r.hours); }
-      else { h2Hours += num(r.hours); }
+      if (day <= 14) { h1Hours += num(r.hours); h1Pay += calc.hoursPay; }
+      else { h2Hours += num(r.hours); h2Pay += calc.hoursPay; }
       // platform breakdown only counts for chatters (non-chatters have no sales)
       if (!isNonChatter(m)) {
         grand.ofNet += calc.ofNet;
@@ -3774,9 +3784,6 @@ async function renderPayroll() {
         grand.fanslyNet += calc.fanslyNet;
       }
     });
-
-    const h1Pay = h1Hours * num(m.hourly_rate);
-    const h2Pay = h2Hours * num(m.hourly_rate);
 
     const h1Sub = (subs || []).some((s) => s.user_id === m.id && s.period === pKeys[0]);
     const h2Sub = (subs || []).some((s) => s.user_id === m.id && s.period === pKeys[1]);
