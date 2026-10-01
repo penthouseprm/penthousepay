@@ -3608,6 +3608,139 @@ $("metrics-body").addEventListener("input", (e) => {
   }, 700);
 });
 
+// small +/- change indicator shown under a column total (vs previous month).
+// positive → green, negative → red. `money` formats as currency, else integer.
+function deltaHtml(cur, prev, money) {
+  const d = cur - prev;
+  if (Math.abs(d) < (money ? 0.005 : 0.5)) return `<div class="delta flat">—</div>`;
+  const up = d > 0;
+  const mag = money ? fmt(Math.abs(d)) : String(Math.round(Math.abs(d)));
+  return `<div class="delta ${up ? "up" : "down"}">${up ? "+" : "−"}${mag}</div>`;
+}
+
+// Computes payroll column totals for a month WITHOUT touching the DOM, so the
+// current render can show month-over-month deltas. Mirrors the math in the
+// render loop exactly (fired redistribution, per-day rates, manager 1%, etc).
+async function computePayrollMonthTotals(monthDate) {
+  const { first, last } = monthRange(monthDate);
+  const m2 = String(monthDate.getMonth() + 1).padStart(2, "0");
+  const pay15Key = `${monthDate.getFullYear()}-${m2}-P15`;
+  const pay1Key = `${monthDate.getFullYear()}-${m2}-P1`;
+
+  const [
+    { data: members },
+    { data: pays },
+    { data: monthBonuses },
+    { data: monthFines },
+    { data: monthOT },
+    { data: mgrTeams },
+    { data: mgrAssigns },
+  ] = await Promise.all([
+    db.from("profiles").select("*"),
+    db.from("payments").select("*").in("period", [pay15Key, pay1Key]),
+    db.from("bonuses").select("*").eq("month", bonusMonthKey(monthDate)),
+    db.from("fines").select("*").eq("month", bonusMonthKey(monthDate)),
+    db.from("overtime_requests").select("*").eq("status", "approved").gte("ot_date", first).lte("ot_date", last),
+    db.from("manager_teams").select("*"),
+    db.from("manager_team_members").select("*"),
+  ]);
+  const sheets = await fetchAllTimesheets(first, last);
+  const cache = realMembers(members || []);
+
+  const platByUser = {};
+  (sheets || []).forEach((r) => {
+    const cm = cache.find((x) => x.id === r.user_id);
+    if (!cm || isNonChatter(cm)) return;
+    const c = calcRow(r, cm);
+    const p = platByUser[r.user_id] || (platByUser[r.user_id] = { of: 0, fv: 0, fansly: 0, slushy: 0 });
+    p.of += c.ofNet; p.fv += c.fvNet; p.fansly += c.fanslyNet; p.slushy += c.slushyNet;
+  });
+  const admins = cache.filter((x) => x.role === "admin");
+  const mgrTeamNet = {};
+  const floaterNet = { of: 0, fv: 0, fansly: 0, slushy: 0 };
+  (mgrTeams || []).forEach((t) => {
+    if (t.is_floater) {
+      (mgrAssigns || []).filter((a) => a.team_id === t.id).forEach((a) => {
+        const p = platByUser[a.user_id];
+        if (p) { floaterNet.of += p.of; floaterNet.fv += p.fv; floaterNet.fansly += p.fansly; floaterNet.slushy += p.slushy; }
+      });
+      return;
+    }
+    const mgr = resolveTeamManager(t.name, admins);
+    if (!mgr) return;
+    const acc = mgrTeamNet[mgr.id] || (mgrTeamNet[mgr.id] = { of: 0, fv: 0, fansly: 0, slushy: 0 });
+    (mgrAssigns || []).filter((a) => a.team_id === t.id).forEach((a) => {
+      const p = platByUser[a.user_id];
+      if (p) { acc.of += p.of; acc.fv += p.fv; acc.fansly += p.fansly; acc.slushy += p.slushy; }
+    });
+  });
+  (mgrTeams || []).forEach((t) => {
+    if (t.is_floater) return;
+    const mgr = resolveTeamManager(t.name, admins);
+    if (mgr && !mgrTeamNet[mgr.id]) mgrTeamNet[mgr.id] = { of: 0, fv: 0, fansly: 0, slushy: 0 };
+  });
+  const ids = Object.keys(mgrTeamNet);
+  const shareCount = ids.length || 1;
+  const fs = { of: floaterNet.of / shareCount, fv: floaterNet.fv / shareCount, fansly: floaterNet.fansly / shareCount, slushy: floaterNet.slushy / shareCount };
+  ids.forEach((mid) => { mgrTeamNet[mid].of += fs.of; mgrTeamNet[mid].fv += fs.fv; mgrTeamNet[mid].fansly += fs.fansly; mgrTeamNet[mid].slushy += fs.slushy; });
+
+  const grand = { h1Hours: 0, h2Hours: 0, comm: 0, net: 0, bonus: 0, ot: 0, fines: 0, on15: 0, on1: 0, total: 0 };
+  const hourly = {};
+  HOURLY_ROLES.forEach((r) => hourly[r] = { h1Hours: 0, h2Hours: 0, on15: 0, on1: 0, total: 0 });
+  const mgr = { h1Hours: 0, h2Hours: 0, teamNet: 0, comm: 0, on15: 0, on1: 0, total: 0 };
+
+  cache.forEach((m) => {
+    if (isSuperAdmin(m)) return;
+    const rows = (sheets || []).filter((s) => s.user_id === m.id);
+    const hasData = rows.length > 0 || (monthBonuses || []).some((b) => b.user_id === m.id) || (monthOT || []).some((o) => o.user_id === m.id);
+    if (!wasEmployedIn(m, monthDate, hasData)) return;
+    let h1Hours = 0, h2Hours = 0, commMonth = 0, netMonth = 0, h1Pay = 0, h2Pay = 0;
+    rows.forEach((r) => {
+      const day = parseInt(r.entry_date.slice(8), 10);
+      const calc = calcRow(r, m);
+      commMonth += calc.commission; netMonth += calc.total;
+      if (day <= 14) { h1Hours += num(r.hours); h1Pay += calc.hoursPay; }
+      else { h2Hours += num(r.hours); h2Pay += calc.hoursPay; }
+    });
+    const paid15 = (pays || []).some((p) => p.user_id === m.id && p.period === pay15Key);
+
+    if (m.role === "admin") {
+      const plat = mgrTeamNet[m.id] || { of: 0, fv: 0, fansly: 0, slushy: 0 };
+      const teamNet = plat.of + plat.fv + plat.fansly + plat.slushy;
+      const mgrComm = teamNet * 0.01;
+      let payOn15 = h1Pay, payOn1 = h2Pay + mgrComm;
+      if (m.fired && !paid15) { payOn15 = h1Pay + h2Pay + mgrComm; payOn1 = 0; }
+      mgr.h1Hours += h1Hours; mgr.h2Hours += h2Hours; mgr.teamNet += teamNet; mgr.comm += mgrComm;
+      mgr.on15 += payOn15; mgr.on1 += payOn1; mgr.total += payOn15 + payOn1;
+      return;
+    }
+    if (HOURLY_ROLES.includes(m.role)) {
+      const g = hourly[m.role] || (hourly[m.role] = { h1Hours: 0, h2Hours: 0, on15: 0, on1: 0, total: 0 });
+      let payOn15 = h1Pay, payOn1 = h2Pay;
+      if (m.fired && !paid15) { payOn15 = h1Pay + h2Pay; payOn1 = 0; }
+      g.h1Hours += h1Hours; g.h2Hours += h2Hours; g.on15 += payOn15; g.on1 += payOn1; g.total += payOn15 + payOn1;
+      return;
+    }
+    const bonusRow = (monthBonuses || []).find((b) => b.user_id === m.id);
+    const bonusTotal = bonusRow ? calcBonusTotal(bonusRow) : 0;
+    const fineTotal = (monthFines || []).filter((f) => f.user_id === m.id).reduce((s, f) => s + num(f.amount), 0);
+    let ot15Pay = 0, ot1Pay = 0;
+    (monthOT || []).filter((o) => o.user_id === m.id).forEach((o) => {
+      const otPay = num(o.hours) * num(m.hourly_rate) * (1 + num(o.boost_pct) / 100);
+      const d = parseInt(o.ot_date.slice(8), 10);
+      if (d <= 14) ot15Pay += otPay; else ot1Pay += otPay;
+    });
+    const otTotal = ot15Pay + ot1Pay;
+    let payOn15 = h1Pay + ot15Pay, payOn1 = h2Pay + commMonth + bonusTotal + ot1Pay - fineTotal;
+    if (m.fired && !paid15) { payOn15 = h1Pay + h2Pay + commMonth + bonusTotal + otTotal - fineTotal; payOn1 = 0; }
+    grand.h1Hours += h1Hours; grand.h2Hours += h2Hours; grand.comm += commMonth; grand.net += netMonth;
+    grand.bonus += bonusTotal; grand.ot += otTotal; grand.fines += fineTotal;
+    grand.on15 += payOn15; grand.on1 += payOn1; grand.total += payOn15 + payOn1;
+  });
+
+  return { grand, hourly, mgr };
+}
+
 async function renderPayroll() {
   $("pay-month-label").textContent = monthLabel(payMonth);
   $("member-sheet-panel").classList.add("hidden");
@@ -3952,20 +4085,29 @@ async function renderPayroll() {
     body.appendChild(tr);
   });
 
+  // previous month's totals, for the +/- change indicators under each column
+  const prevMonthDate = new Date(payMonth.getFullYear(), payMonth.getMonth() - 1, 1);
+  let prev = null;
+  try { prev = await computePayrollMonthTotals(prevMonthDate); } catch (_) { prev = null; }
+  const pg = prev ? prev.grand : {};
+  const pm = prev ? prev.mgr : {};
+  const ph = prev ? prev.hourly : {};
+  const z = {}; // fallback when no previous data
+
   $("payroll-foot").innerHTML = `
     <tr>
       <td>ALL CHATTERS</td>
       <td></td>
-      <td class="col-num">${grand.h1Hours}</td>
-      <td class="col-num">${grand.h2Hours}</td>
-      <td class="col-num net-fv">${fmt(grand.net)} <button class="net-breakdown-btn" type="button" data-net-breakdown title="Platform breakdown">▦</button></td>
-      <td class="col-num cell-grey">${fmt(grand.comm)}</td>
-      <td class="col-num cell-grey">${fmt(grand.bonus)}</td>
-      <td class="col-num cell-grey">${fmt(grand.ot)}</td>
-      <td class="col-num cell-grey">${grand.fines > 0 ? "−" + fmt(grand.fines) : fmt(0)}</td>
-      <td class="col-num cell-payout"><strong>${fmt(grand.on15)}</strong></td>
-      <td class="col-num cell-payout"><strong>${fmt(grand.on1)}</strong></td>
-      <td class="col-num"><strong>${fmt(grand.total)}</strong></td>
+      <td class="col-num">${grand.h1Hours}${deltaHtml(grand.h1Hours, pg.h1Hours || 0, false)}</td>
+      <td class="col-num">${grand.h2Hours}${deltaHtml(grand.h2Hours, pg.h2Hours || 0, false)}</td>
+      <td class="col-num net-fv">${fmt(grand.net)} <button class="net-breakdown-btn" type="button" data-net-breakdown title="Platform breakdown">▦</button>${deltaHtml(grand.net, pg.net || 0, true)}</td>
+      <td class="col-num cell-grey">${fmt(grand.comm)}${deltaHtml(grand.comm, pg.comm || 0, true)}</td>
+      <td class="col-num cell-grey">${fmt(grand.bonus)}${deltaHtml(grand.bonus, pg.bonus || 0, true)}</td>
+      <td class="col-num cell-grey">${fmt(grand.ot)}${deltaHtml(grand.ot, pg.ot || 0, true)}</td>
+      <td class="col-num cell-grey">${grand.fines > 0 ? "−" + fmt(grand.fines) : fmt(0)}${deltaHtml(grand.fines, pg.fines || 0, true)}</td>
+      <td class="col-num cell-payout"><strong>${fmt(grand.on15)}</strong>${deltaHtml(grand.on15, pg.on15 || 0, true)}</td>
+      <td class="col-num cell-payout"><strong>${fmt(grand.on1)}</strong>${deltaHtml(grand.on1, pg.on1 || 0, true)}</td>
+      <td class="col-num"><strong>${fmt(grand.total)}</strong>${deltaHtml(grand.total, pg.total || 0, true)}</td>
     </tr>
   `;
 
@@ -3974,15 +4116,16 @@ async function renderPayroll() {
     const sec = hourlySections[role];
     const hasRows = sec.body.children.length > 0;
     sec.body.closest("section.panel").classList.toggle("hidden", !hasRows);
+    const ps = (ph && ph[role]) ? ph[role] : z;
     sec.foot.innerHTML = `
       <tr>
         <td>ALL ${roleLabel(role).toUpperCase()}</td>
         <td></td>
-        <td class="col-num">${sec.grand.h1Hours}</td>
-        <td class="col-num">${sec.grand.h2Hours}</td>
-        <td class="col-num cell-payout"><strong>${fmt(sec.grand.on15)}</strong></td>
-        <td class="col-num cell-payout"><strong>${fmt(sec.grand.on1)}</strong></td>
-        <td class="col-num"><strong>${fmt(sec.grand.total)}</strong></td>
+        <td class="col-num">${sec.grand.h1Hours}${deltaHtml(sec.grand.h1Hours, ps.h1Hours || 0, false)}</td>
+        <td class="col-num">${sec.grand.h2Hours}${deltaHtml(sec.grand.h2Hours, ps.h2Hours || 0, false)}</td>
+        <td class="col-num cell-payout"><strong>${fmt(sec.grand.on15)}</strong>${deltaHtml(sec.grand.on15, ps.on15 || 0, true)}</td>
+        <td class="col-num cell-payout"><strong>${fmt(sec.grand.on1)}</strong>${deltaHtml(sec.grand.on1, ps.on1 || 0, true)}</td>
+        <td class="col-num"><strong>${fmt(sec.grand.total)}</strong>${deltaHtml(sec.grand.total, ps.total || 0, true)}</td>
       </tr>
     `;
   });
@@ -3991,13 +4134,13 @@ async function renderPayroll() {
     <tr>
       <td>ALL MANAGERS</td>
       <td></td>
-      <td class="col-num">${mgrGrand.h1Hours}</td>
-      <td class="col-num">${mgrGrand.h2Hours}</td>
-      <td class="col-num net-fv">${fmt(mgrGrand.teamNet)}</td>
-      <td class="col-num cell-grey">${fmt(mgrGrand.comm)}</td>
-      <td class="col-num cell-payout"><strong>${fmt(mgrGrand.on15)}</strong></td>
-      <td class="col-num cell-payout"><strong>${fmt(mgrGrand.on1)}</strong></td>
-      <td class="col-num"><strong>${fmt(mgrGrand.total)}</strong></td>
+      <td class="col-num">${mgrGrand.h1Hours}${deltaHtml(mgrGrand.h1Hours, pm.h1Hours || 0, false)}</td>
+      <td class="col-num">${mgrGrand.h2Hours}${deltaHtml(mgrGrand.h2Hours, pm.h2Hours || 0, false)}</td>
+      <td class="col-num net-fv">${fmt(mgrGrand.teamNet)}${deltaHtml(mgrGrand.teamNet, pm.teamNet || 0, true)}</td>
+      <td class="col-num cell-grey">${fmt(mgrGrand.comm)}${deltaHtml(mgrGrand.comm, pm.comm || 0, true)}</td>
+      <td class="col-num cell-payout"><strong>${fmt(mgrGrand.on15)}</strong>${deltaHtml(mgrGrand.on15, pm.on15 || 0, true)}</td>
+      <td class="col-num cell-payout"><strong>${fmt(mgrGrand.on1)}</strong>${deltaHtml(mgrGrand.on1, pm.on1 || 0, true)}</td>
+      <td class="col-num"><strong>${fmt(mgrGrand.total)}</strong>${deltaHtml(mgrGrand.total, pm.total || 0, true)}</td>
     </tr>
   `;
 

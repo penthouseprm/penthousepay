@@ -1398,3 +1398,16 @@ button.sub-badge.unsub:hover .sub-redo { display: inline; }
 .metrics-team-row.team-drop-after td {
   box-shadow: inset 0 -4px 0 var(--accent);
 }
+
+/* ════════════ UPDATE 55: payroll month-over-month deltas ════════════ */
+.delta {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  margin-top: 2px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.delta.up { color: var(--c-fv); }
+.delta.down { color: var(--c-total); }
+.delta.flat { color: var(--text-dim); font-weight: 500; }
